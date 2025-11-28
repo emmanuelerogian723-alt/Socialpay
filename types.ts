@@ -14,14 +14,13 @@ export interface User {
   avatar: string;
   role: Role;
   balance: number;
-  xp: number; // For gamification
+  xp: number;
   badges: string[];
   verificationStatus: VerificationStatus;
   joinedAt: number;
   bio?: string;
-  // Social Stats
-  followers: string[]; // Array of user IDs
-  following: string[]; // Array of user IDs
+  followers: string[];
+  following: string[];
   totalViews?: number;
   totalLikes?: number;
 }
@@ -34,10 +33,11 @@ export interface Campaign {
   type: TaskType;
   title: string;
   description: string;
+  targetUrl?: string; // Added target URL
   rewardPerTask: number;
   totalBudget: number;
   remainingBudget: number;
-  status: 'active' | 'paused' | 'completed';
+  status: 'active' | 'completed' | 'paused';
   completedCount: number;
   createdAt: number;
 }
@@ -49,7 +49,8 @@ export interface Task {
   type: TaskType;
   title: string;
   reward: number;
-  status: 'available' | 'pending' | 'verified' | 'rejected';
+  status: 'available' | 'completed';
+  targetUrl?: string;
 }
 
 export interface Transaction {
@@ -57,34 +58,28 @@ export interface Transaction {
   userId: string;
   userName: string;
   amount: number;
-  type: 'withdrawal' | 'deposit' | 'earning' | 'fee' | 'adjustment' | 'purchase';
+  type: 'earning' | 'withdrawal' | 'deposit' | 'fee' | 'adjustment' | 'purchase';
   status: 'pending' | 'completed' | 'rejected';
-  method: string; 
-  details: string; 
+  method: string;
+  details: string;
   timestamp: number;
 }
 
 export interface Notification {
   id: string;
-  userId: string; 
+  userId: string;
   title: string;
   message: string;
-  type: 'info' | 'success' | 'warning' | 'error';
+  type: 'success' | 'info' | 'warning' | 'error';
   read: boolean;
   timestamp: number;
 }
 
-export interface Comment {
-  text: string;
-  user: string;
-  avatar: string;
-}
-
 export interface VideoEditingData {
-  filter: string; 
-  stickers: Array<{ id: string; emoji: string; x: number; y: number }>;
-  textOverlays: Array<{ id: string; text: string; x: number; y: number; color: string }>;
-  trim?: { start: number; end: number }; // Start/End in seconds
+    filter: string;
+    stickers: { id: string, emoji: string, x: number, y: number }[];
+    textOverlays: { id: string, text: string, x: number, y: number, color: string }[];
+    trim?: { start: number, end: number };
 }
 
 export interface Video {
@@ -92,25 +87,33 @@ export interface Video {
   userId: string;
   userName: string;
   userAvatar: string;
-  url: string; 
+  url: string;
   caption: string;
   likes: number;
-  views: number; // New view count
+  views?: number;
   comments: number;
-  commentsList?: Comment[];
+  commentsList?: { text: string, user: string, avatar: string }[];
   tags?: string[];
   editingData?: VideoEditingData;
   timestamp: number;
 }
 
 export interface Draft {
-  id: string;
-  userId: string;
-  videoFile: string; // Base64
-  caption: string;
-  tags: string;
-  editingData: VideoEditingData;
-  timestamp: number;
+    id: string;
+    userId: string;
+    videoFile: string;
+    caption: string;
+    tags: string;
+    editingData: VideoEditingData;
+    timestamp: number;
+}
+
+export interface ChatMessage {
+    id: string;
+    senderId: string;
+    receiverId: string;
+    text: string;
+    timestamp: number;
 }
 
 export interface Gig {
@@ -121,16 +124,21 @@ export interface Gig {
   description: string;
   price: number;
   category: 'graphics' | 'video' | 'writing' | 'marketing';
-  image: string; 
+  image: string;
   timestamp: number;
   rating?: number;
   ratingCount?: number;
 }
 
-export interface ChatMessage {
+export interface CommunityPost {
   id: string;
-  senderId: string;
-  receiverId: string;
-  text: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  content: string;
+  image?: string;
+  likes: number;
+  comments: number;
   timestamp: number;
+  likedBy: string[]; // User IDs
 }

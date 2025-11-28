@@ -1,9 +1,10 @@
 
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Video, User, VideoEditingData, Draft, ChatMessage } from '../types';
 import { storageService } from '../services/storageService';
 import { Card, Button, Input, Modal, Badge } from './UIComponents';
-import { Heart, MessageCircle, Share2, Plus, Play, X, Send, ArrowLeft, Grid, Users, Upload, Sparkles, Scissors, Type, Sticker, Music, Check, Volume2, VolumeX, Save, FileVideo, Eye, Clock, MessageSquare } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Plus, Play, X, Send, ArrowLeft, Grid, Users, Upload, Sparkles, Scissors, Type, Sticker, Music, Check, Volume2, VolumeX, Save, FileVideo, Eye, Clock, MessageSquare, Search } from 'lucide-react';
 
 interface ReelsViewProps {
   user: User;
@@ -28,6 +29,8 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
   const [muted, setMuted] = useState(true);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
   
   // Profile View State
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
@@ -325,12 +328,38 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   };
   const profileData = getProfileData();
 
+  const filteredVideos = videos.filter(v => {
+      if(!searchTerm) return true;
+      const searchLower = searchTerm.toLowerCase();
+      return v.caption?.toLowerCase().includes(searchLower) || v.tags?.some(t => t.toLowerCase().includes(searchLower));
+  });
+
   return (
     <div className="max-w-md mx-auto h-[calc(100vh-140px)] flex flex-col relative bg-black rounded-2xl overflow-hidden shadow-2xl">
       
       {/* Header Actions */}
       {!viewingProfileId && !isUploading && !selectedVideo && (
         <div className="absolute top-4 right-4 z-20 flex flex-col gap-4">
+           {showSearch ? (
+               <div className="absolute right-0 top-0 w-64 animate-slide-up flex items-center bg-white/90 rounded-full p-1 pr-3">
+                   <input 
+                      autoFocus
+                      className="bg-transparent border-none focus:ring-0 text-sm w-full px-3"
+                      placeholder="Search hashtags..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onBlur={() => !searchTerm && setShowSearch(false)}
+                   />
+                   <X className="w-4 h-4 text-gray-500 cursor-pointer" onClick={() => {setShowSearch(false); setSearchTerm('');}} />
+               </div>
+           ) : (
+               <button 
+                onClick={() => setShowSearch(true)} 
+                className="bg-gray-900/50 text-white p-3 rounded-full backdrop-blur-md hover:bg-indigo-600 transition-all border border-white/10"
+               >
+                 <Search className="w-6 h-6" />
+               </button>
+           )}
            <button 
              onClick={() => setIsUploading(true)} 
              className="bg-gray-900/50 text-white p-3 rounded-full backdrop-blur-md hover:bg-indigo-600 transition-all border border-white/10"
@@ -343,7 +372,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
       {/* Main Feed */}
       {!isUploading && !viewingProfileId && !selectedVideo && (
         <div className="flex-1 overflow-y-scroll snap-y snap-mandatory scrollbar-hide h-full">
-            {videos.map(video => (
+            {filteredVideos.map(video => (
             <div 
                 key={video.id} 
                 data-videoid={video.id}
@@ -438,6 +467,11 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
                 </div>
             </div>
             ))}
+            {filteredVideos.length === 0 && (
+                <div className="h-full flex items-center justify-center text-gray-500">
+                    No reels found.
+                </div>
+            )}
         </div>
       )}
 

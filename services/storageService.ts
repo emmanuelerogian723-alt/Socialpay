@@ -1,5 +1,6 @@
 
-import { User, Campaign, Transaction, Notification, Role, Video, Gig, Draft, ChatMessage } from '../types';
+
+import { User, Campaign, Transaction, Notification, Role, Video, Gig, Draft, ChatMessage, CommunityPost } from '../types';
 
 // Keys for LocalStorage
 const KEYS = {
@@ -11,6 +12,7 @@ const KEYS = {
   GIGS: 'socialpay_gigs',
   DRAFTS: 'socialpay_drafts',
   CHATS: 'socialpay_chats',
+  COMMUNITY: 'socialpay_community',
 };
 
 // Initial Seed Data
@@ -38,6 +40,22 @@ const seedData = () => {
   if (!localStorage.getItem(KEYS.CAMPAIGNS)) localStorage.setItem(KEYS.CAMPAIGNS, JSON.stringify([]));
   if (!localStorage.getItem(KEYS.TRANSACTIONS)) localStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify([]));
   if (!localStorage.getItem(KEYS.NOTIFICATIONS)) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify([]));
+  if (!localStorage.getItem(KEYS.COMMUNITY)) {
+      const seedPosts: CommunityPost[] = [
+          {
+              id: 'cp1',
+              userId: 'admin-01',
+              userName: 'SocialPay Team',
+              userAvatar: 'https://ui-avatars.com/api/?name=Social+Pay',
+              content: 'Welcome to the new Community Feed! Share your thoughts, tips, and connect with others here. 🚀',
+              likes: 42,
+              comments: 5,
+              timestamp: Date.now(),
+              likedBy: []
+          }
+      ];
+      localStorage.setItem(KEYS.COMMUNITY, JSON.stringify(seedPosts));
+  }
   if (!localStorage.getItem(KEYS.VIDEOS)) {
     const seedVideos: Video[] = [
       {
@@ -299,6 +317,32 @@ export const storageService = {
     const list = get<ChatMessage>(KEYS.CHATS);
     list.push(msg);
     set(KEYS.CHATS, list);
+  },
+
+  // --- Community ---
+  getCommunityPosts: () => get<CommunityPost>(KEYS.COMMUNITY).sort((a, b) => b.timestamp - a.timestamp),
+  createCommunityPost: (post: CommunityPost) => {
+      const list = get<CommunityPost>(KEYS.COMMUNITY);
+      list.unshift(post);
+      set(KEYS.COMMUNITY, list);
+  },
+  likeCommunityPost: (postId: string, userId: string) => {
+      const list = get<CommunityPost>(KEYS.COMMUNITY);
+      const idx = list.findIndex(p => p.id === postId);
+      if(idx !== -1) {
+          const post = list[idx];
+          if(post.likedBy.includes(userId)) {
+              // Unlike
+              post.likedBy = post.likedBy.filter(id => id !== userId);
+              post.likes--;
+          } else {
+              // Like
+              post.likedBy.push(userId);
+              post.likes++;
+          }
+          list[idx] = post;
+          set(KEYS.COMMUNITY, list);
+      }
   },
 
   // --- Notifications ---

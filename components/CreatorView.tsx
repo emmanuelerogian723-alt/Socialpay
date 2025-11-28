@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Plus, TrendingUp, Users, Eye, PlayCircle, Sparkles, Wallet, Camera, Upload, Trophy, LayoutDashboard, User as UserIcon } from 'lucide-react';
 import { Campaign, User, TaskType, Platform, Transaction } from '../types';
@@ -61,6 +62,7 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
       type: newCampaign.type as TaskType,
       title: newCampaign.title,
       description: newCampaign.description || '',
+      targetUrl: newCampaign.targetUrl || '',
       rewardPerTask: Number(newCampaign.rewardPerTask),
       totalBudget: Number(newCampaign.totalBudget),
       remainingBudget: Number(newCampaign.totalBudget),
@@ -153,6 +155,16 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
                 placeholder="Instructions for engagers..." 
                 value={newCampaign.description || ''}
                 onChange={e => setNewCampaign({...newCampaign, description: e.target.value})}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Target Link (Post URL)</label>
+              <Input 
+                placeholder="https://instagram.com/p/..." 
+                value={newCampaign.targetUrl || ''}
+                onChange={e => setNewCampaign({...newCampaign, targetUrl: e.target.value})}
+                required
               />
             </div>
             
@@ -407,6 +419,36 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
                         {user.bio || "No bio added yet. Go to Settings to update your profile description."}
                     </p>
                 </div>
+              </Card>
+
+              {/* Campaign Performance Section */}
+              <Card className="mb-6">
+                 <h3 className="font-bold mb-4 flex items-center">
+                    <TrendingUp className="w-5 h-5 mr-2 text-indigo-600"/> Campaign Performance
+                 </h3>
+                 <div className="space-y-4">
+                     {campaigns.length === 0 && <p className="text-gray-500 text-sm">No campaigns to track.</p>}
+                     {campaigns.map(c => {
+                         const progress = Math.min(100, Math.round(((c.totalBudget - c.remainingBudget) / c.totalBudget) * 100));
+                         return (
+                             <div key={c.id} className="border border-gray-100 dark:border-gray-700 rounded-lg p-3">
+                                 <div className="flex justify-between items-center mb-2">
+                                     <div className="text-sm font-bold">{c.title}</div>
+                                     <div className="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
+                                         {progress}% Complete
+                                     </div>
+                                 </div>
+                                 <div className="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-2 overflow-hidden mb-1">
+                                    <div className="bg-green-500 h-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                                 </div>
+                                 <div className="flex justify-between text-xs text-gray-500">
+                                     <span>{c.completedCount} Engagements</span>
+                                     <span>${c.remainingBudget.toFixed(2)} Remaining</span>
+                                 </div>
+                             </div>
+                         )
+                     })}
+                 </div>
               </Card>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

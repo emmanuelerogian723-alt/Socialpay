@@ -1,17 +1,20 @@
+
+
 import React, { useState, useEffect } from 'react';
 import { User, Notification } from './types';
-import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag } from 'lucide-react';
+import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe } from 'lucide-react';
 import CreatorView from './components/CreatorView';
 import EngagerView from './components/EngagerView';
 import AdminView from './components/AdminView';
 import ReelsView from './components/ReelsView';
 import GigsView from './components/GigsView';
+import CommunityView from './components/CommunityView';
 import SettingsView from './components/SettingsView';
 import { AuthView } from './components/AuthView';
 import { ToastContainer } from './components/UIComponents';
 import { storageService } from './services/storageService';
 
-type ViewState = 'dashboard' | 'reels' | 'gigs' | 'settings';
+type ViewState = 'dashboard' | 'reels' | 'gigs' | 'community' | 'settings';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -118,6 +121,7 @@ const App: React.FC = () => {
           <NavItem icon={LayoutDashboard} label="Dashboard" viewId="dashboard" />
           <NavItem icon={PlayCircle} label="Reels" viewId="reels" />
           <NavItem icon={ShoppingBag} label="Gig Market" viewId="gigs" />
+          <NavItem icon={Globe} label="Community" viewId="community" />
           <div className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-6">Account</div>
           <NavItem icon={Settings} label="Settings" viewId="settings" />
         </div>
@@ -148,7 +152,7 @@ const App: React.FC = () => {
           
           <div className="flex-1 max-w-xl mx-4">
              <h2 className="text-lg font-semibold capitalize text-gray-700 dark:text-gray-200">
-               {currentView === 'gigs' ? 'Marketplace' : currentView}
+               {currentView === 'gigs' ? 'Marketplace' : currentView === 'community' ? 'Community Feed' : currentView}
              </h2>
           </div>
 
@@ -185,6 +189,7 @@ const App: React.FC = () => {
           )}
           {currentView === 'reels' && <ReelsView user={user} />}
           {currentView === 'gigs' && <GigsView user={user} onUpdateUser={setUser} />}
+          {currentView === 'community' && <CommunityView user={user} />}
           {currentView === 'settings' && <SettingsView user={user} onUpdateUser={setUser} />}
         </div>
         
