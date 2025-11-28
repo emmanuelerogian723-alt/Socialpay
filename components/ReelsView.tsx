@@ -245,14 +245,18 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
       // Simulate Upload Progress
       let progress = 0;
       const interval = setInterval(() => {
-         progress += 10;
+         // Non-linear progress simulation
+         const increment = Math.max(1, Math.floor(Math.random() * 5)); 
+         progress = Math.min(progress + increment, 100);
+         
          setUploadProgress(progress);
+         
          if (progress >= 100) {
              clearInterval(interval);
              // Small delay to ensure state updates
-             setTimeout(() => finalizePost(), 200);
+             setTimeout(() => finalizePost(), 500);
          }
-      }, 200);
+      }, 50);
   };
 
   const finalizePost = () => {
@@ -446,10 +450,47 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
       >
           {/* Progress Overlay */}
           {uploadProgress > 0 && (
-              <div className="absolute inset-0 z-50 bg-white dark:bg-gray-900 flex flex-col items-center justify-center">
-                  <div className="w-20 h-20 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
-                  <h3 className="text-xl font-bold">Uploading Reel...</h3>
-                  <p className="text-gray-500">{uploadProgress}%</p>
+              <div className="absolute inset-0 z-50 bg-white/95 dark:bg-gray-900/95 flex flex-col items-center justify-center p-8 backdrop-blur-sm">
+                  <div className="w-full max-w-sm space-y-6 text-center">
+                      <div className="relative mx-auto w-24 h-24">
+                          <svg className="w-full h-full transform -rotate-90">
+                              <circle
+                                  cx="48"
+                                  cy="48"
+                                  r="40"
+                                  stroke="currentColor"
+                                  strokeWidth="8"
+                                  fill="transparent"
+                                  className="text-gray-200 dark:text-gray-700"
+                              />
+                              <circle
+                                  cx="48"
+                                  cy="48"
+                                  r="40"
+                                  stroke="currentColor"
+                                  strokeWidth="8"
+                                  fill="transparent"
+                                  strokeDasharray={251.2}
+                                  strokeDashoffset={251.2 - (251.2 * uploadProgress) / 100}
+                                  className="text-indigo-600 transition-all duration-300 ease-out"
+                              />
+                          </svg>
+                          <div className="absolute inset-0 flex items-center justify-center font-bold text-xl">
+                              {uploadProgress}%
+                          </div>
+                      </div>
+                      
+                      <div>
+                        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Uploading Reel</h3>
+                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                            <div 
+                                className="bg-gradient-to-r from-indigo-500 to-purple-600 h-full transition-all duration-200" 
+                                style={{ width: `${uploadProgress}%` }}
+                            />
+                        </div>
+                        <p className="text-gray-500 text-sm mt-3">Optimizing video and applying effects...</p>
+                      </div>
+                  </div>
               </div>
           )}
 

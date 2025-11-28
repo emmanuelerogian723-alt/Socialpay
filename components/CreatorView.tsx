@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { Plus, TrendingUp, Users, Eye, PlayCircle, Sparkles, Wallet } from 'lucide-react';
+import { Plus, TrendingUp, Users, Eye, PlayCircle, Sparkles, Wallet, Camera, Upload, Trophy, LayoutDashboard, User as UserIcon } from 'lucide-react';
 import { Campaign, User, TaskType, Platform, Transaction } from '../types';
 import { Card, Button, Input, Select, Badge, Modal, BankDetails } from './UIComponents';
 import { generateCampaignInsights } from '../services/geminiService';
@@ -11,7 +12,7 @@ interface CreatorViewProps {
 }
 
 const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
-  const [view, setView] = useState<'dashboard' | 'create'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'create' | 'profile'>('dashboard');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [insight, setInsight] = useState<string | null>(null);
   const [loadingInsight, setLoadingInsight] = useState(false);
@@ -110,9 +111,26 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
      alert("Deposit request submitted! Funds will be added after Admin approval.");
   };
 
+  const handleProfileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert("File size too large. Please upload an image under 5MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const updatedUser = { ...user, avatar: reader.result as string };
+        storageService.updateUser(updatedUser);
+        onUpdateUser(updatedUser);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   if (view === 'create') {
     return (
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-2xl mx-auto animate-slide-up">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold">Create New Campaign</h2>
           <Button variant="ghost" onClick={() => setView('dashboard')}>Cancel</Button>
@@ -218,93 +236,213 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
+      {/* Top Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h1 className="text-2xl font-bold">Creator Dashboard</h1>
-        <Button onClick={() => setView('create')}><Plus className="w-4 h-4 mr-2" /> New Campaign</Button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="p-4">
-           <div className="text-gray-500 text-sm mb-1">Active Campaigns</div>
-           <div className="text-2xl font-bold">{campaigns.filter(c => c.status === 'active').length}</div>
-        </Card>
-        <Card className="p-4">
-           <div className="text-gray-500 text-sm mb-1">Total Engagement</div>
-           <div className="text-2xl font-bold flex items-center text-indigo-600">
-             <TrendingUp className="w-5 h-5 mr-1" />
-             {campaigns.reduce((acc, c) => acc + c.completedCount, 0)}
-           </div>
-        </Card>
-        <Card className="p-4">
-           <div className="text-gray-500 text-sm mb-1">Budget Spent</div>
-           <div className="text-2xl font-bold text-gray-700 dark:text-gray-300">
-             ${(campaigns.reduce((acc, c) => acc + (c.totalBudget - c.remainingBudget), 0)).toFixed(2)}
-           </div>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="space-y-4">
-             <h3 className="text-lg font-bold">Your Campaigns</h3>
-             {campaigns.length === 0 && <p className="text-gray-500">No campaigns yet. Create one!</p>}
-             {campaigns.map(c => (
-               <Card key={c.id} className="flex flex-col md:flex-row justify-between items-center gap-4">
-                 <div className="flex-1">
-                   <div className="flex items-center space-x-2 mb-1">
-                     <Badge color={c.status === 'active' ? 'green' : 'gray'}>{c.status}</Badge>
-                     <span className="font-semibold text-gray-900 dark:text-white">{c.title}</span>
-                   </div>
-                   <div className="text-sm text-gray-500">
-                     {c.platform} • {c.type} • ${c.rewardPerTask}/action
-                   </div>
-                 </div>
-                 <div className="text-center md:text-right px-4">
-                    <div className="text-2xl font-bold">{c.completedCount}</div>
-                    <div className="text-xs text-gray-500">Completions</div>
-                 </div>
-                 <div className="flex flex-col gap-2 w-full md:w-auto">
-                    <Button variant="outline" size="sm" onClick={() => getAiInsight(c)}>
-                      <Sparkles className="w-3 h-3 mr-1" /> AI Insight
-                    </Button>
-                 </div>
-               </Card>
-             ))}
-          </div>
-        </div>
-
         <div>
-          <Card className="bg-gradient-to-b from-indigo-600 to-purple-700 text-white h-full">
-            <h3 className="font-bold mb-4 flex items-center">
-              <Sparkles className="w-5 h-5 mr-2" /> AI Assistant
-            </h3>
-            <p className="text-indigo-100 text-sm mb-4">
-              Get real-time suggestions on how to improve your campaign ROI.
-            </p>
-            
-            <div className="bg-white/10 p-4 rounded-lg backdrop-blur-sm min-h-[150px] flex items-center justify-center mb-4">
-              {loadingInsight ? (
-                <div className="animate-pulse">Analyzing campaign data...</div>
-              ) : insight ? (
-                <p className="text-sm italic">"{insight}"</p>
-              ) : (
-                <p className="text-sm text-indigo-200 text-center">Select a campaign to generate insights.</p>
-              )}
-            </div>
-            
-            <div className="mt-auto pt-6 border-t border-white/20">
-               <div className="text-xs uppercase tracking-wider text-indigo-200 mb-2 flex items-center">
-                 <Wallet className="w-4 h-4 mr-1"/> Wallet Balance
-               </div>
-               <div className="text-3xl font-bold">${user.balance.toFixed(2)}</div>
-               <Button className="w-full mt-4 bg-white text-indigo-600 hover:bg-indigo-50 font-bold" onClick={() => setShowDepositModal(true)}>
-                 Add Funds
-               </Button>
-            </div>
-          </Card>
+           <h1 className="text-2xl font-bold">Creator Portal</h1>
+           <p className="text-gray-500 text-sm">Manage your campaigns and growth</p>
+        </div>
+        <div className="flex items-center space-x-2">
+           <Button variant="outline" onClick={() => setView('profile')}>
+             <UserIcon className="w-4 h-4 mr-2"/> My Profile
+           </Button>
+           <Button onClick={() => setView('create')}>
+             <Plus className="w-4 h-4 mr-2" /> New Campaign
+           </Button>
         </div>
       </div>
+
+      {/* Tabs */}
+      <div className="flex space-x-2 border-b border-gray-200 dark:border-gray-700 pb-1">
+        <button 
+           onClick={() => setView('dashboard')} 
+           className={`px-4 py-2 text-sm font-medium flex items-center ${view === 'dashboard' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}
+        >
+           <LayoutDashboard className="w-4 h-4 mr-2"/> Dashboard
+        </button>
+        <button 
+           onClick={() => setView('profile')} 
+           className={`px-4 py-2 text-sm font-medium flex items-center ${view === 'profile' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}
+        >
+           <UserIcon className="w-4 h-4 mr-2"/> Profile
+        </button>
+      </div>
+
+      {view === 'dashboard' && (
+        <div className="space-y-6 animate-slide-up">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="p-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-none">
+                    <div className="text-blue-100 text-sm mb-1">Active Campaigns</div>
+                    <div className="text-3xl font-bold">{campaigns.filter(c => c.status === 'active').length}</div>
+                </Card>
+                <Card className="p-4">
+                    <div className="text-gray-500 text-sm mb-1">Total Engagement</div>
+                    <div className="text-3xl font-bold flex items-center text-indigo-600">
+                        <TrendingUp className="w-6 h-6 mr-1" />
+                        {campaigns.reduce((acc, c) => acc + c.completedCount, 0)}
+                    </div>
+                </Card>
+                <Card className="p-4">
+                    <div className="text-gray-500 text-sm mb-1">Budget Spent</div>
+                    <div className="text-3xl font-bold text-gray-700 dark:text-gray-300">
+                        ${(campaigns.reduce((acc, c) => acc + (c.totalBudget - c.remainingBudget), 0)).toFixed(2)}
+                    </div>
+                </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 space-y-6">
+                    <div className="space-y-4">
+                        <h3 className="text-lg font-bold">Your Campaigns</h3>
+                        {campaigns.length === 0 && <p className="text-gray-500">No campaigns yet. Create one!</p>}
+                        {campaigns.map(c => (
+                        <Card key={c.id} className="flex flex-col md:flex-row justify-between items-center gap-4">
+                            <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-1">
+                                <Badge color={c.status === 'active' ? 'green' : 'gray'}>{c.status}</Badge>
+                                <span className="font-semibold text-gray-900 dark:text-white">{c.title}</span>
+                            </div>
+                            <div className="text-sm text-gray-500">
+                                {c.platform} • {c.type} • ${c.rewardPerTask}/action
+                            </div>
+                            </div>
+                            <div className="text-center md:text-right px-4">
+                                <div className="text-2xl font-bold">{c.completedCount}</div>
+                                <div className="text-xs text-gray-500">Completions</div>
+                            </div>
+                            <div className="flex flex-col gap-2 w-full md:w-auto">
+                                <Button variant="outline" size="sm" onClick={() => getAiInsight(c)}>
+                                <Sparkles className="w-3 h-3 mr-1" /> AI Insight
+                                </Button>
+                            </div>
+                        </Card>
+                        ))}
+                    </div>
+                </div>
+
+                <div>
+                    <Card className="bg-gradient-to-b from-indigo-600 to-purple-700 text-white h-full">
+                        <h3 className="font-bold mb-4 flex items-center">
+                        <Sparkles className="w-5 h-5 mr-2" /> AI Assistant
+                        </h3>
+                        <p className="text-indigo-100 text-sm mb-4">
+                        Get real-time suggestions on how to improve your campaign ROI.
+                        </p>
+                        
+                        <div className="bg-white/10 p-4 rounded-lg backdrop-blur-sm min-h-[150px] flex items-center justify-center mb-4">
+                        {loadingInsight ? (
+                            <div className="animate-pulse">Analyzing campaign data...</div>
+                        ) : insight ? (
+                            <p className="text-sm italic">"{insight}"</p>
+                        ) : (
+                            <p className="text-sm text-indigo-200 text-center">Select a campaign to generate insights.</p>
+                        )}
+                        </div>
+                        
+                        <div className="mt-auto pt-6 border-t border-white/20">
+                        <div className="text-xs uppercase tracking-wider text-indigo-200 mb-2 flex items-center">
+                            <Wallet className="w-4 h-4 mr-1"/> Wallet Balance
+                        </div>
+                        <div className="text-3xl font-bold">${user.balance.toFixed(2)}</div>
+                        <Button className="w-full mt-4 bg-white text-indigo-600 hover:bg-indigo-50 font-bold" onClick={() => setShowDepositModal(true)}>
+                            Add Funds
+                        </Button>
+                        </div>
+                    </Card>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {view === 'profile' && (
+          <div className="max-w-3xl mx-auto animate-slide-up">
+              <Card className="overflow-hidden mb-6">
+                <div className="h-40 bg-gradient-to-r from-purple-500 to-indigo-600 -m-6 mb-6"></div>
+                
+                <div className="flex flex-col items-center -mt-20 mb-6">
+                    <div className="relative group">
+                        <img 
+                            src={user.avatar} 
+                            className="w-36 h-36 rounded-full border-4 border-white dark:border-gray-800 object-cover shadow-lg bg-white" 
+                            alt="Avatar" 
+                        />
+                        <label className="absolute bottom-2 right-2 bg-indigo-600 text-white p-2.5 rounded-full cursor-pointer hover:bg-indigo-700 transition-colors shadow-lg hover:scale-110 transform">
+                            <Camera className="w-5 h-5" />
+                            <input type="file" className="hidden" accept="image/*" onChange={handleProfileUpload} />
+                        </label>
+                    </div>
+                    <h2 className="text-3xl font-bold mt-4">{user.name}</h2>
+                    <p className="text-gray-500">{user.email}</p>
+                    <div className="mt-3 flex space-x-2">
+                        <Badge color="yellow" className="text-sm px-3 py-1">Creator Account</Badge>
+                        <Badge color={user.verificationStatus === 'verified' ? 'green' : 'gray'} className="text-sm px-3 py-1">
+                            {user.verificationStatus === 'verified' ? 'Verified' : 'Unverified'}
+                        </Badge>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-4 border-t border-gray-100 dark:border-gray-700">
+                    <div className="text-center">
+                        <div className="text-gray-500 text-sm">Campaigns Run</div>
+                        <div className="text-2xl font-bold text-gray-800 dark:text-gray-200">{campaigns.length}</div>
+                    </div>
+                    <div className="text-center border-l border-r border-gray-100 dark:border-gray-700">
+                        <div className="text-gray-500 text-sm">Total Spent</div>
+                        <div className="text-2xl font-bold text-gray-800 dark:text-gray-200">
+                             ${(campaigns.reduce((acc, c) => acc + (c.totalBudget - c.remainingBudget), 0)).toFixed(0)}
+                        </div>
+                    </div>
+                    <div className="text-center">
+                        <div className="text-gray-500 text-sm">Engagement Generated</div>
+                        <div className="text-2xl font-bold text-indigo-600">
+                            {campaigns.reduce((acc, c) => acc + c.completedCount, 0)}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-6 bg-gray-50 dark:bg-gray-900/50 -m-6 mt-0 border-t border-gray-100 dark:border-gray-700">
+                    <h3 className="font-bold mb-2">About</h3>
+                    <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed">
+                        {user.bio || "No bio added yet. Go to Settings to update your profile description."}
+                    </p>
+                </div>
+              </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <Card>
+                      <h3 className="font-bold mb-4 flex items-center">
+                          <Wallet className="w-5 h-5 mr-2 text-indigo-600"/> Financial Overview
+                      </h3>
+                      <div className="space-y-3">
+                          <div className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                              <span className="text-sm text-gray-500">Current Balance</span>
+                              <span className="font-bold">${user.balance.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                              <span className="text-sm text-gray-500">Total Deposited</span>
+                              <span className="font-bold">$0.00</span> 
+                          </div>
+                          <Button className="w-full mt-2" onClick={() => setShowDepositModal(true)}>Add Funds</Button>
+                      </div>
+                  </Card>
+                  
+                  <Card className="flex flex-col justify-center items-center text-center p-8">
+                      <div className="bg-indigo-100 dark:bg-indigo-900/30 p-4 rounded-full mb-4">
+                          <Upload className="w-8 h-8 text-indigo-600" />
+                      </div>
+                      <h3 className="font-bold text-lg mb-2">Update Avatar</h3>
+                      <p className="text-sm text-gray-500 mb-4">
+                          Keep your brand fresh by updating your profile picture regularly.
+                      </p>
+                      <label className="btn btn-primary cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">
+                          Choose Image
+                          <input type="file" className="hidden" accept="image/*" onChange={handleProfileUpload} />
+                      </label>
+                  </Card>
+              </div>
+          </div>
+      )}
 
       <Modal isOpen={showDepositModal} onClose={() => setShowDepositModal(false)} title="Add Funds">
          <BankDetails />
