@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Gig, User } from '../types';
 import { storageService } from '../services/storageService';
 import { Card, Button, Input, Badge, Select, Modal } from './UIComponents';
-import { Plus, Briefcase, ShoppingBag, Search, Star, Filter, Heart, ChevronRight, Lock } from 'lucide-react';
+import { Plus, Briefcase, ShoppingBag, Search, Star, Filter, Heart, ChevronRight, Lock, ArrowUpDown } from 'lucide-react';
 
 interface GigsViewProps {
   user: User;
@@ -15,6 +15,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedGig, setSelectedGig] = useState<Gig | null>(null);
+  const [sortBy, setSortBy] = useState<'newest' | 'price_asc' | 'price_desc' | 'rating'>('newest');
   
   const [newGig, setNewGig] = useState<Partial<Gig>>({
     category: 'graphics',
@@ -36,6 +37,12 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                             gig.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = selectedCategory === 'all' || gig.category === selectedCategory;
       return matchesSearch && matchesCategory;
+  }).sort((a, b) => {
+    if (sortBy === 'price_asc') return a.price - b.price;
+    if (sortBy === 'price_desc') return b.price - a.price;
+    if (sortBy === 'rating') return (b.rating || 0) - (a.rating || 0);
+    // newest default
+    return b.timestamp - a.timestamp;
   });
 
   const handleCreateGig = (e: React.FormEvent) => {
@@ -161,17 +168,29 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
       </div>
 
       {/* Filters & Search */}
-      <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative">
-             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-             <Input 
-                placeholder="Search services..." 
-                className="pl-10 h-12"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-             />
+      <div className="flex flex-col gap-4">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1 relative">
+               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+               <Input 
+                  placeholder="Search services..." 
+                  className="pl-10 h-12"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+               />
+            </div>
+            <div className="flex items-center space-x-2">
+               <ArrowUpDown className="w-4 h-4 text-gray-500" />
+               <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="w-40 h-12">
+                   <option value="newest">Newest First</option>
+                   <option value="price_asc">Price: Low to High</option>
+                   <option value="price_desc">Price: High to Low</option>
+                   <option value="rating">Best Rated</option>
+               </Select>
+            </div>
           </div>
-          <div className="flex overflow-x-auto gap-2 pb-2 md:pb-0 scrollbar-hide">
+          
+          <div className="flex overflow-x-auto gap-2 pb-2 scrollbar-hide">
               {categories.map(cat => (
                   <button
                     key={cat.id}

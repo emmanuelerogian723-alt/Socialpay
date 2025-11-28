@@ -1,3 +1,4 @@
+
 export type Role = 'creator' | 'engager' | 'admin';
 
 export type Platform = 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'linkedin';
@@ -74,6 +75,12 @@ export interface Comment {
   avatar: string;
 }
 
+export interface VideoEditingData {
+  filter: string; // CSS filter class or style
+  stickers: Array<{ id: string; emoji: string; x: number; y: number }>;
+  textOverlays: Array<{ id: string; text: string; x: number; y: number; color: string }>;
+}
+
 export interface Video {
   id: string;
   userId: string;
@@ -84,6 +91,8 @@ export interface Video {
   likes: number;
   comments: number;
   commentsList?: Comment[];
+  tags?: string[];
+  editingData?: VideoEditingData;
   timestamp: number;
 }
 

@@ -147,6 +147,12 @@ export const storageService = {
     }
   },
 
+  deleteCampaign: (id: string) => {
+    const list = get<Campaign>(KEYS.CAMPAIGNS);
+    const filtered = list.filter(c => c.id !== id);
+    set(KEYS.CAMPAIGNS, filtered);
+  },
+
   // --- Transactions ---
   getTransactions: () => get<Transaction>(KEYS.TRANSACTIONS).sort((a, b) => b.timestamp - a.timestamp),
 
@@ -182,6 +188,11 @@ export const storageService = {
     list.unshift(video);
     set(KEYS.VIDEOS, list);
   },
+  deleteVideo: (id: string) => {
+    const list = get<Video>(KEYS.VIDEOS);
+    const filtered = list.filter(v => v.id !== id);
+    set(KEYS.VIDEOS, filtered);
+  },
 
   // --- Gigs ---
   getGigs: () => get<Gig>(KEYS.GIGS).sort((a, b) => b.timestamp - a.timestamp),
@@ -189,6 +200,11 @@ export const storageService = {
     const list = get<Gig>(KEYS.GIGS);
     list.unshift(gig);
     set(KEYS.GIGS, list);
+  },
+  deleteGig: (id: string) => {
+    const list = get<Gig>(KEYS.GIGS);
+    const filtered = list.filter(g => g.id !== id);
+    set(KEYS.GIGS, filtered);
   },
 
   // --- Notifications ---

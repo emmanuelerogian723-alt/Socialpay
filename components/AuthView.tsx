@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, Role } from '../types';
 import { Button, Input, Card, Select } from './UIComponents';
 import { storageService } from '../services/storageService';
-import { Shield } from 'lucide-react';
+import { Shield, Fingerprint } from 'lucide-react';
 
 interface AuthViewProps {
   onLogin: (user: User) => void;
@@ -18,6 +18,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('engager');
   const [error, setError] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +72,23 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
       storageService.createUser(newUser);
       onLogin(newUser);
     }
+  };
+
+  const handleBiometricLogin = () => {
+      setIsScanning(true);
+      setTimeout(() => {
+          setIsScanning(false);
+          // Simulate Passkey finding the last logged in user or a demo user
+          // For demo purposes, we will try to find a random engager or admin if email is prefilled
+          if (email) {
+              const user = storageService.getUserByEmail(email);
+              if (user) {
+                  onLogin(user);
+                  return;
+              }
+          }
+          alert("Passkey simulation: Please enter your email first to identify the account.");
+      }, 1500);
   };
 
   return (
@@ -141,6 +159,24 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
           <Button type="submit" className="w-full" size="lg">
             {isLogin ? 'Sign In' : 'Create Account'}
           </Button>
+
+          {isLogin && (
+              <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 bg-white dark:bg-gray-800 text-gray-500">Or continue with</span>
+                  </div>
+              </div>
+          )}
+
+          {isLogin && (
+              <Button type="button" variant="outline" className="w-full" onClick={handleBiometricLogin} disabled={isScanning}>
+                 <Fingerprint className={`w-5 h-5 mr-2 ${isScanning ? 'animate-pulse text-indigo-500' : ''}`} />
+                 {isScanning ? 'Scanning...' : 'Biometric / Passkey'}
+              </Button>
+          )}
         </form>
 
         <div className="mt-6 text-center text-sm">
