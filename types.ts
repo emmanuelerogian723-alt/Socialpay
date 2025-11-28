@@ -16,9 +16,14 @@ export interface User {
   balance: number;
   xp: number; // For gamification
   badges: string[];
-  verificationStatus: VerificationStatus; // Replaces hasPaidEntryFee
+  verificationStatus: VerificationStatus;
   joinedAt: number;
   bio?: string;
+  // Social Stats
+  followers: string[]; // Array of user IDs
+  following: string[]; // Array of user IDs
+  totalViews?: number;
+  totalLikes?: number;
 }
 
 export interface Campaign {
@@ -54,14 +59,14 @@ export interface Transaction {
   amount: number;
   type: 'withdrawal' | 'deposit' | 'earning' | 'fee' | 'adjustment' | 'purchase';
   status: 'pending' | 'completed' | 'rejected';
-  method: string; // e.g., 'PayPal', 'Bank Transfer', 'Admin'
-  details: string; // e.g., 'Bank: Chase, Account: ****1234, Country: USA'
+  method: string; 
+  details: string; 
   timestamp: number;
 }
 
 export interface Notification {
   id: string;
-  userId: string; // 'all' or specific userId
+  userId: string; 
   title: string;
   message: string;
   type: 'info' | 'success' | 'warning' | 'error';
@@ -76,9 +81,10 @@ export interface Comment {
 }
 
 export interface VideoEditingData {
-  filter: string; // CSS filter class or style
+  filter: string; 
   stickers: Array<{ id: string; emoji: string; x: number; y: number }>;
   textOverlays: Array<{ id: string; text: string; x: number; y: number; color: string }>;
+  trim?: { start: number; end: number }; // Start/End in seconds
 }
 
 export interface Video {
@@ -86,13 +92,24 @@ export interface Video {
   userId: string;
   userName: string;
   userAvatar: string;
-  url: string; // URL to video resource
+  url: string; 
   caption: string;
   likes: number;
+  views: number; // New view count
   comments: number;
   commentsList?: Comment[];
   tags?: string[];
   editingData?: VideoEditingData;
+  timestamp: number;
+}
+
+export interface Draft {
+  id: string;
+  userId: string;
+  videoFile: string; // Base64
+  caption: string;
+  tags: string;
+  editingData: VideoEditingData;
   timestamp: number;
 }
 
@@ -104,8 +121,16 @@ export interface Gig {
   description: string;
   price: number;
   category: 'graphics' | 'video' | 'writing' | 'marketing';
-  image: string; // Thumbnail
+  image: string; 
   timestamp: number;
   rating?: number;
   ratingCount?: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  text: string;
+  timestamp: number;
 }

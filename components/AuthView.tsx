@@ -66,7 +66,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
         xp: 0,
         badges: [],
         verificationStatus: 'unpaid', // New users must pay fee
-        joinedAt: Date.now()
+        joinedAt: Date.now(),
+        followers: [],
+        following: []
       };
 
       storageService.createUser(newUser);

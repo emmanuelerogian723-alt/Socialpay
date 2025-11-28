@@ -1,4 +1,5 @@
-import { User, Campaign, Transaction, Notification, Role, Video, Gig } from '../types';
+
+import { User, Campaign, Transaction, Notification, Role, Video, Gig, Draft, ChatMessage } from '../types';
 
 // Keys for LocalStorage
 const KEYS = {
@@ -8,6 +9,8 @@ const KEYS = {
   NOTIFICATIONS: 'socialpay_notifications',
   VIDEOS: 'socialpay_videos',
   GIGS: 'socialpay_gigs',
+  DRAFTS: 'socialpay_drafts',
+  CHATS: 'socialpay_chats',
 };
 
 // Initial Seed Data
@@ -24,7 +27,11 @@ const seedData = () => {
       badges: [],
       verificationStatus: 'verified',
       joinedAt: Date.now(),
-      bio: 'System Administrator'
+      bio: 'System Administrator',
+      followers: [],
+      following: [],
+      totalViews: 1000,
+      totalLikes: 500
     };
     localStorage.setItem(KEYS.USERS, JSON.stringify([admin]));
   }
@@ -41,6 +48,7 @@ const seedData = () => {
         url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
         caption: 'Welcome to SocialPay Reels! 🎥',
         likes: 120,
+        views: 1050,
         comments: 45,
         timestamp: Date.now()
       }
@@ -93,6 +101,50 @@ export const storageService = {
       users[index] = updatedUser;
       set(KEYS.USERS, users);
     }
+  },
+
+  toggleFollow: (currentUserId: string, targetUserId: string) => {
+    const users = get<User>(KEYS.USERS);
+    const currentUserIdx = users.findIndex(u => u.id === currentUserId);
+    const targetUserIdx = users.findIndex(u => u.id === targetUserId);
+
+    if (currentUserIdx !== -1 && targetUserIdx !== -1) {
+      const currentUser = users[currentUserIdx];
+      const targetUser = users[targetUserIdx];
+
+      // Init arrays if undefined
+      if(!currentUser.following) currentUser.following = [];
+      if(!targetUser.followers) targetUser.followers = [];
+
+      const isFollowing = currentUser.following.includes(targetUserId);
+
+      if (isFollowing) {
+        // Unfollow
+        currentUser.following = currentUser.following.filter(id => id !== targetUserId);
+        targetUser.followers = targetUser.followers.filter(id => id !== currentUserId);
+      } else {
+        // Follow
+        currentUser.following.push(targetUserId);
+        targetUser.followers.push(currentUserId);
+        
+        // Notify Target
+        storageService.createNotification({
+          id: Date.now().toString(),
+          userId: targetUserId,
+          title: 'New Follower',
+          message: `${currentUser.name} started following you!`,
+          type: 'success',
+          read: false,
+          timestamp: Date.now()
+        });
+      }
+      
+      users[currentUserIdx] = currentUser;
+      users[targetUserIdx] = targetUser;
+      set(KEYS.USERS, users);
+      return !isFollowing; // Return new status
+    }
+    return false;
   },
 
   // Admin function to directly manipulate wallet
@@ -187,11 +239,39 @@ export const storageService = {
     const list = get<Video>(KEYS.VIDEOS);
     list.unshift(video);
     set(KEYS.VIDEOS, list);
+    
+    // Increment User Total Likes/Views logic would go here ideally
   },
   deleteVideo: (id: string) => {
     const list = get<Video>(KEYS.VIDEOS);
     const filtered = list.filter(v => v.id !== id);
     set(KEYS.VIDEOS, filtered);
+  },
+  incrementVideoView: (videoId: string) => {
+    const list = get<Video>(KEYS.VIDEOS);
+    const idx = list.findIndex(v => v.id === videoId);
+    if (idx !== -1) {
+      list[idx].views = (list[idx].views || 0) + 1;
+      set(KEYS.VIDEOS, list);
+    }
+  },
+
+  // --- Drafts ---
+  getDrafts: (userId: string) => get<Draft>(KEYS.DRAFTS).filter(d => d.userId === userId),
+  saveDraft: (draft: Draft) => {
+    const list = get<Draft>(KEYS.DRAFTS);
+    const existingIdx = list.findIndex(d => d.id === draft.id);
+    if (existingIdx !== -1) {
+      list[existingIdx] = draft;
+    } else {
+      list.unshift(draft);
+    }
+    set(KEYS.DRAFTS, list);
+  },
+  deleteDraft: (id: string) => {
+    const list = get<Draft>(KEYS.DRAFTS);
+    const filtered = list.filter(d => d.id !== id);
+    set(KEYS.DRAFTS, filtered);
   },
 
   // --- Gigs ---
@@ -205,6 +285,20 @@ export const storageService = {
     const list = get<Gig>(KEYS.GIGS);
     const filtered = list.filter(g => g.id !== id);
     set(KEYS.GIGS, filtered);
+  },
+
+  // --- Chat ---
+  getMessages: (user1Id: string, user2Id: string) => {
+    const all = get<ChatMessage>(KEYS.CHATS);
+    return all.filter(m => 
+      (m.senderId === user1Id && m.receiverId === user2Id) || 
+      (m.senderId === user2Id && m.receiverId === user1Id)
+    ).sort((a, b) => a.timestamp - b.timestamp);
+  },
+  sendMessage: (msg: ChatMessage) => {
+    const list = get<ChatMessage>(KEYS.CHATS);
+    list.push(msg);
+    set(KEYS.CHATS, list);
   },
 
   // --- Notifications ---
