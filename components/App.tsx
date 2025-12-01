@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Notification } from './types';
+import { User, Notification } from '../types';
 import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe } from 'lucide-react';
 import CreatorView from './components/CreatorView';
 import EngagerView from './components/EngagerView';
@@ -23,15 +23,8 @@ const App: React.FC = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
 
-  // Load User Session
-  useEffect(() => {
-    const checkUser = async () => {
-        // In a real Supabase app, we listen to auth state changes.
-        // For this hybrid, if user is already in memory or local storage, we reload.
-        // Assuming user is managed by AuthView and passed up.
-    };
-    checkUser();
-  }, []);
+  // Load User Session (Supabase doesn't need manual localStorage for user ID)
+  // Auth state persists via supabase client internally
 
   // Poll for notifications
   useEffect(() => {

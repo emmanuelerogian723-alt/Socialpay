@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { Plus, TrendingUp, Users, Eye, PlayCircle, Sparkles, Wallet, Camera, Upload, Trophy, LayoutDashboard, User as UserIcon } from 'lucide-react';
 import { Campaign, User, TaskType, Platform, Transaction } from '../types';
@@ -22,8 +21,11 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
   const [depositRef, setDepositRef] = useState('');
 
   useEffect(() => {
-    const myCampaigns = storageService.getCampaigns().filter(c => c.creatorId === user.id);
-    setCampaigns(myCampaigns);
+    const loadCampaigns = async () => {
+        const allCampaigns = await storageService.getCampaigns();
+        setCampaigns(allCampaigns.filter(c => c.creatorId === user.id));
+    };
+    loadCampaigns();
   }, [view, user.id]);
 
   // Form State
@@ -34,7 +36,7 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
     totalBudget: 10.00
   });
 
-  const handleCreateCampaign = (e: React.FormEvent) => {
+  const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Validation
@@ -72,11 +74,11 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
     };
 
     // Save to DB
-    storageService.createCampaign(campaign);
+    await storageService.createCampaign(campaign);
     
     // Deduct Budget
     const updatedUser = { ...user, balance: user.balance - campaign.totalBudget };
-    storageService.updateUser(updatedUser);
+    await storageService.updateUser(updatedUser);
     onUpdateUser(updatedUser);
 
     setCampaigns([campaign, ...campaigns]);
@@ -91,7 +93,7 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
     setLoadingInsight(false);
   }
 
-  const handleDeposit = () => {
+  const handleDeposit = async () => {
      if(!depositAmount || !depositRef) return alert("Please fill in all details");
      
      const tx: Transaction = {
@@ -106,7 +108,7 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
        timestamp: Date.now()
      };
 
-     storageService.createTransaction(tx);
+     await storageService.createTransaction(tx);
      setShowDepositModal(false);
      setDepositAmount('');
      setDepositRef('');
@@ -121,9 +123,9 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
         return;
       }
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const updatedUser = { ...user, avatar: reader.result as string };
-        storageService.updateUser(updatedUser);
+        await storageService.updateUser(updatedUser);
         onUpdateUser(updatedUser);
       };
       reader.readAsDataURL(file);

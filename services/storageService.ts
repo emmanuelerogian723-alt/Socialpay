@@ -1,373 +1,499 @@
 
+import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage } from '../types';
 
-import { User, Campaign, Transaction, Notification, Role, Video, Gig, Draft, ChatMessage, CommunityPost } from '../types';
+// Helper to determine mode
+const USE_SUPABASE = isSupabaseConfigured();
 
-// Keys for LocalStorage
-const KEYS = {
-  USERS: 'socialpay_users',
-  CAMPAIGNS: 'socialpay_campaigns',
-  TRANSACTIONS: 'socialpay_transactions',
-  NOTIFICATIONS: 'socialpay_notifications',
-  VIDEOS: 'socialpay_videos',
-  GIGS: 'socialpay_gigs',
-  DRAFTS: 'socialpay_drafts',
-  CHATS: 'socialpay_chats',
-  COMMUNITY: 'socialpay_community',
+// --- LOCAL MOCK HELPERS (Fallback) ---
+const getLocal = <T>(key: string, def: T): T => {
+  try {
+    const item = localStorage.getItem(`socialpay_${key}`);
+    return item ? JSON.parse(item) : def;
+  } catch { return def; }
 };
+const setLocal = (key: string, val: any) => localStorage.setItem(`socialpay_${key}`, JSON.stringify(val));
 
-// Initial Seed Data
-const seedData = () => {
-  if (!localStorage.getItem(KEYS.USERS)) {
-    const admin: User = {
-      id: 'admin-01',
-      email: 'emmanuelerog@gmail.com',
-      name: 'Super Admin',
-      avatar: 'https://ui-avatars.com/api/?name=Super+Admin&background=0D8ABC&color=fff',
-      role: 'admin',
-      balance: 1000,
-      xp: 0,
-      badges: [],
-      verificationStatus: 'verified',
-      joinedAt: Date.now(),
-      bio: 'System Administrator',
-      followers: [],
-      following: [],
-      totalViews: 1000,
-      totalLikes: 500
+export const loadMediaFromDB = async (key: string): Promise<string | null> => {
+  if (USE_SUPABASE) return null; // Supabase uses public URLs directly
+  
+  // IDB Fallback for Mock Mode
+  return new Promise((resolve) => {
+    const request = indexedDB.open('SocialPayMediaDB', 1);
+    request.onsuccess = (event: any) => {
+      const db = event.target.result;
+      const tx = db.transaction('media', 'readonly');
+      const store = tx.objectStore('media');
+      const getReq = store.get(key);
+      getReq.onsuccess = () => resolve(getReq.result ? getReq.result.data : null);
+      getReq.onerror = () => resolve(null);
     };
-    localStorage.setItem(KEYS.USERS, JSON.stringify([admin]));
-  }
-  if (!localStorage.getItem(KEYS.CAMPAIGNS)) localStorage.setItem(KEYS.CAMPAIGNS, JSON.stringify([]));
-  if (!localStorage.getItem(KEYS.TRANSACTIONS)) localStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify([]));
-  if (!localStorage.getItem(KEYS.NOTIFICATIONS)) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify([]));
-  if (!localStorage.getItem(KEYS.COMMUNITY)) {
-      const seedPosts: CommunityPost[] = [
-          {
-              id: 'cp1',
-              userId: 'admin-01',
-              userName: 'SocialPay Team',
-              userAvatar: 'https://ui-avatars.com/api/?name=Social+Pay',
-              content: 'Welcome to the new Community Feed! Share your thoughts, tips, and connect with others here. 🚀',
-              likes: 42,
-              comments: 5,
-              timestamp: Date.now(),
-              likedBy: []
-          }
-      ];
-      localStorage.setItem(KEYS.COMMUNITY, JSON.stringify(seedPosts));
-  }
-  if (!localStorage.getItem(KEYS.VIDEOS)) {
-    const seedVideos: Video[] = [
-      {
-        id: 'v1',
-        userId: 'admin-01',
-        userName: 'SocialPay Team',
-        userAvatar: 'https://ui-avatars.com/api/?name=Social+Pay',
-        url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-        caption: 'Welcome to SocialPay Reels! 🎥',
-        likes: 120,
-        views: 1050,
-        comments: 45,
-        timestamp: Date.now()
-      }
-    ];
-    localStorage.setItem(KEYS.VIDEOS, JSON.stringify(seedVideos));
-  }
-  if (!localStorage.getItem(KEYS.GIGS)) {
-    const seedGigs: Gig[] = [
-       {
-         id: 'g1',
-         sellerId: 'admin-01',
-         sellerName: 'SocialPay Design',
-         title: 'Professional Logo Design',
-         description: 'I will design a modern, minimalist logo for your brand.',
-         price: 50,
-         category: 'graphics',
-         image: 'https://images.unsplash.com/photo-1626785774573-4b799314346d?w=500&auto=format&fit=crop&q=60',
-         timestamp: Date.now()
-       }
-    ];
-    localStorage.setItem(KEYS.GIGS, JSON.stringify(seedGigs));
-  }
+    request.onerror = () => resolve(null);
+  });
 };
 
-seedData();
-
-// --- Helpers ---
-const get = <T>(key: string): T[] => JSON.parse(localStorage.getItem(key) || '[]');
-const set = (key: string, data: any[]) => localStorage.setItem(key, JSON.stringify(data));
+const saveMediaToIDB = async (blobStr: string): Promise<string> => {
+    return new Promise((resolve) => {
+        const request = indexedDB.open('SocialPayMediaDB', 1);
+        request.onupgradeneeded = (e: any) => {
+            e.target.result.createObjectStore('media');
+        };
+        request.onsuccess = (e: any) => {
+            const db = e.target.result;
+            const tx = db.transaction('media', 'readwrite');
+            const id = `media_${Date.now()}_${Math.random()}`;
+            tx.objectStore('media').put({ data: blobStr }, id);
+            tx.oncomplete = () => resolve(`idb:${id}`);
+        };
+    });
+};
 
 export const storageService = {
-  // --- Auth & Users ---
-  getUsers: () => get<User>(KEYS.USERS),
   
-  getUserByEmail: (email: string) => get<User>(KEYS.USERS).find(u => u.email === email),
-  
-  getUserById: (id: string) => get<User>(KEYS.USERS).find(u => u.id === id),
-  
-  createUser: (user: User) => {
-    const users = get<User>(KEYS.USERS);
-    users.push(user);
-    set(KEYS.USERS, users);
-    return user;
-  },
-
-  updateUser: (updatedUser: User) => {
-    const users = get<User>(KEYS.USERS);
-    const index = users.findIndex(u => u.id === updatedUser.id);
-    if (index !== -1) {
-      users[index] = updatedUser;
-      set(KEYS.USERS, users);
-    }
-  },
-
-  toggleFollow: (currentUserId: string, targetUserId: string) => {
-    const users = get<User>(KEYS.USERS);
-    const currentUserIdx = users.findIndex(u => u.id === currentUserId);
-    const targetUserIdx = users.findIndex(u => u.id === targetUserId);
-
-    if (currentUserIdx !== -1 && targetUserIdx !== -1) {
-      const currentUser = users[currentUserIdx];
-      const targetUser = users[targetUserIdx];
-
-      // Init arrays if undefined
-      if(!currentUser.following) currentUser.following = [];
-      if(!targetUser.followers) targetUser.followers = [];
-
-      const isFollowing = currentUser.following.includes(targetUserId);
-
-      if (isFollowing) {
-        // Unfollow
-        currentUser.following = currentUser.following.filter(id => id !== targetUserId);
-        targetUser.followers = targetUser.followers.filter(id => id !== currentUserId);
-      } else {
-        // Follow
-        currentUser.following.push(targetUserId);
-        targetUser.followers.push(currentUserId);
-        
-        // Notify Target
-        storageService.createNotification({
-          id: Date.now().toString(),
-          userId: targetUserId,
-          title: 'New Follower',
-          message: `${currentUser.name} started following you!`,
-          type: 'success',
-          read: false,
-          timestamp: Date.now()
-        });
-      }
-      
-      users[currentUserIdx] = currentUser;
-      users[targetUserIdx] = targetUser;
-      set(KEYS.USERS, users);
-      return !isFollowing; // Return new status
-    }
-    return false;
-  },
-
-  // Admin function to directly manipulate wallet
-  adminAdjustBalance: (userId: string, amount: number, reason: string) => {
-    const users = get<User>(KEYS.USERS);
-    const userIndex = users.findIndex(u => u.id === userId);
-    if (userIndex !== -1) {
-      users[userIndex].balance += amount;
-      set(KEYS.USERS, users);
-
-      // Record Transaction
-      const tx: Transaction = {
-        id: Date.now().toString(),
-        userId,
-        userName: users[userIndex].name,
-        amount: Math.abs(amount),
-        type: 'adjustment',
-        status: 'completed',
-        method: 'Admin Action',
-        details: reason,
-        timestamp: Date.now()
-      };
-      storageService.createTransaction(tx);
-    }
-  },
-
-  // --- Campaigns ---
-  getCampaigns: () => get<Campaign>(KEYS.CAMPAIGNS).sort((a, b) => b.createdAt - a.createdAt),
-  
-  createCampaign: (campaign: Campaign) => {
-    const list = get<Campaign>(KEYS.CAMPAIGNS);
-    list.unshift(campaign);
-    set(KEYS.CAMPAIGNS, list);
-    
-    storageService.createNotification({
-      id: Date.now().toString(),
-      userId: 'all',
-      title: 'New Campaign Available!',
-      message: `${campaign.creatorName} just posted a new ${campaign.platform} task.`,
-      type: 'info',
-      read: false,
-      timestamp: Date.now()
-    });
-  },
-
-  updateCampaign: (campaign: Campaign) => {
-    const list = get<Campaign>(KEYS.CAMPAIGNS);
-    const idx = list.findIndex(c => c.id === campaign.id);
-    if (idx !== -1) {
-      list[idx] = campaign;
-      set(KEYS.CAMPAIGNS, list);
-    }
-  },
-
-  deleteCampaign: (id: string) => {
-    const list = get<Campaign>(KEYS.CAMPAIGNS);
-    const filtered = list.filter(c => c.id !== id);
-    set(KEYS.CAMPAIGNS, filtered);
-  },
-
-  // --- Transactions ---
-  getTransactions: () => get<Transaction>(KEYS.TRANSACTIONS).sort((a, b) => b.timestamp - a.timestamp),
-
-  createTransaction: (tx: Transaction) => {
-    const list = get<Transaction>(KEYS.TRANSACTIONS);
-    list.unshift(tx);
-    set(KEYS.TRANSACTIONS, list);
-  },
-
-  updateTransactionStatus: (txId: string, status: 'completed' | 'rejected') => {
-    const list = get<Transaction>(KEYS.TRANSACTIONS);
-    const tx = list.find(t => t.id === txId);
-    if (tx) {
-      tx.status = status;
-      set(KEYS.TRANSACTIONS, list);
-      
-      storageService.createNotification({
-        id: Date.now().toString(),
-        userId: tx.userId,
-        title: `Transaction Update`,
-        message: `Your transaction of $${tx.amount.toFixed(2)} (${tx.type}) has been ${status}.`,
-        type: status === 'completed' ? 'success' : 'error',
-        read: false,
-        timestamp: Date.now()
+  // --- AUTH ---
+  async signUp(email: string, password: string, name: string, role: string) {
+    if (USE_SUPABASE) {
+      const avatar = `https://ui-avatars.com/api/?name=${name.replace(' ', '+')}&background=random`;
+      const { data, error } = await supabase.auth.signUp({
+        email, password,
+        options: { data: { name, role, avatar } }
       });
-    }
-  },
-
-  // --- Videos (Reels) ---
-  getVideos: () => get<Video>(KEYS.VIDEOS).sort((a, b) => b.timestamp - a.timestamp),
-  addVideo: (video: Video) => {
-    const list = get<Video>(KEYS.VIDEOS);
-    list.unshift(video);
-    set(KEYS.VIDEOS, list);
-    
-    // Increment User Total Likes/Views logic would go here ideally
-  },
-  deleteVideo: (id: string) => {
-    const list = get<Video>(KEYS.VIDEOS);
-    const filtered = list.filter(v => v.id !== id);
-    set(KEYS.VIDEOS, filtered);
-  },
-  incrementVideoView: (videoId: string) => {
-    const list = get<Video>(KEYS.VIDEOS);
-    const idx = list.findIndex(v => v.id === videoId);
-    if (idx !== -1) {
-      list[idx].views = (list[idx].views || 0) + 1;
-      set(KEYS.VIDEOS, list);
-    }
-  },
-
-  // --- Drafts ---
-  getDrafts: (userId: string) => get<Draft>(KEYS.DRAFTS).filter(d => d.userId === userId),
-  saveDraft: (draft: Draft) => {
-    const list = get<Draft>(KEYS.DRAFTS);
-    const existingIdx = list.findIndex(d => d.id === draft.id);
-    if (existingIdx !== -1) {
-      list[existingIdx] = draft;
+      if (error) throw error;
+      return data;
     } else {
-      list.unshift(draft);
+        // Mock Signup
+        const users = getLocal<User[]>('users', []);
+        if (users.find(u => u.email === email)) throw new Error("User exists");
+        const newUser: User = {
+            id: `user-${Date.now()}`,
+            email, name, role: role as any,
+            avatar: `https://ui-avatars.com/api/?name=${name.replace(' ', '+')}&background=random`,
+            balance: 0, xp: 0, badges: [], verificationStatus: 'unpaid',
+            joinedAt: Date.now(), followers: [], following: []
+        };
+        users.push(newUser);
+        setLocal('users', users);
+        setLocal('currentUser', newUser);
+        return { user: newUser };
     }
-    set(KEYS.DRAFTS, list);
-  },
-  deleteDraft: (id: string) => {
-    const list = get<Draft>(KEYS.DRAFTS);
-    const filtered = list.filter(d => d.id !== id);
-    set(KEYS.DRAFTS, filtered);
   },
 
-  // --- Gigs ---
-  getGigs: () => get<Gig>(KEYS.GIGS).sort((a, b) => b.timestamp - a.timestamp),
-  createGig: (gig: Gig) => {
-    const list = get<Gig>(KEYS.GIGS);
-    list.unshift(gig);
-    set(KEYS.GIGS, list);
-  },
-  deleteGig: (id: string) => {
-    const list = get<Gig>(KEYS.GIGS);
-    const filtered = list.filter(g => g.id !== id);
-    set(KEYS.GIGS, filtered);
-  },
-
-  // --- Chat ---
-  getMessages: (user1Id: string, user2Id: string) => {
-    const all = get<ChatMessage>(KEYS.CHATS);
-    return all.filter(m => 
-      (m.senderId === user1Id && m.receiverId === user2Id) || 
-      (m.senderId === user2Id && m.receiverId === user1Id)
-    ).sort((a, b) => a.timestamp - b.timestamp);
-  },
-  sendMessage: (msg: ChatMessage) => {
-    const list = get<ChatMessage>(KEYS.CHATS);
-    list.push(msg);
-    set(KEYS.CHATS, list);
+  async signIn(email: string, password: string) {
+    if (USE_SUPABASE) {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      return this.getUserById(data.user.id);
+    } else {
+        // Mock Login
+        const users = getLocal<User[]>('users', []);
+        const user = users.find(u => u.email === email); // In mock, ignore password
+        if (!user) throw new Error("Invalid credentials");
+        setLocal('currentUser', user);
+        return user;
+    }
   },
 
-  // --- Community ---
-  getCommunityPosts: () => get<CommunityPost>(KEYS.COMMUNITY).sort((a, b) => b.timestamp - a.timestamp),
-  createCommunityPost: (post: CommunityPost) => {
-      const list = get<CommunityPost>(KEYS.COMMUNITY);
-      list.unshift(post);
-      set(KEYS.COMMUNITY, list);
+  async signOut() {
+    if (USE_SUPABASE) await supabase.auth.signOut();
+    else localStorage.removeItem('currentUser');
   },
-  likeCommunityPost: (postId: string, userId: string) => {
-      const list = get<CommunityPost>(KEYS.COMMUNITY);
-      const idx = list.findIndex(p => p.id === postId);
-      if(idx !== -1) {
-          const post = list[idx];
-          if(post.likedBy.includes(userId)) {
-              // Unlike
-              post.likedBy = post.likedBy.filter(id => id !== userId);
-              post.likes--;
-          } else {
-              // Like
-              post.likedBy.push(userId);
-              post.likes++;
-          }
-          list[idx] = post;
-          set(KEYS.COMMUNITY, list);
+
+  // --- USERS ---
+  async getUserById(id: string): Promise<User | null> {
+    if (USE_SUPABASE) {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', id).single();
+      if (error) return null;
+      return {
+        ...data,
+        verificationStatus: data.verification_status,
+        joinedAt: data.joined_at,
+        totalViews: 0, totalLikes: 0
+      } as User;
+    } else {
+        const users = getLocal<User[]>('users', []);
+        return users.find(u => u.id === id) || null;
+    }
+  },
+
+  async updateUser(user: Partial<User>) {
+    if (USE_SUPABASE) {
+      const { error } = await supabase.from('profiles').update({
+        name: user.name, avatar: user.avatar, balance: user.balance,
+        bio: user.bio, xp: user.xp, verification_status: user.verificationStatus,
+        followers: user.followers
+      }).eq('id', user.id);
+      if (error) throw error;
+    } else {
+        const users = getLocal<User[]>('users', []);
+        const idx = users.findIndex(u => u.id === user.id);
+        if(idx !== -1) {
+            users[idx] = { ...users[idx], ...user };
+            setLocal('users', users);
+            // Update current user if matches
+            const current = getLocal<User>('currentUser', {} as User);
+            if(current.id === user.id) setLocal('currentUser', users[idx]);
+        }
+    }
+  },
+
+  async getUsers(): Promise<User[]> {
+    if (USE_SUPABASE) {
+      const { data } = await supabase.from('profiles').select('*');
+      return (data || []).map((u: any) => ({
+        ...u, verificationStatus: u.verification_status, joinedAt: u.joined_at
+      }));
+    } else {
+        return getLocal<User[]>('users', []);
+    }
+  },
+
+  async adminAdjustBalance(userId: string, amount: number, reason: string) {
+      // Common logic mostly, but implementing mock separately
+      if (USE_SUPABASE) {
+        const user = await this.getUserById(userId);
+        if(user) {
+            const newBalance = user.balance + amount;
+            await this.updateUser({ ...user, balance: newBalance });
+            await this.createTransaction({
+                id: '', userId: user.id, userName: user.name, amount: Math.abs(amount),
+                type: 'adjustment', status: 'completed', method: 'Admin', details: reason, timestamp: Date.now()
+            });
+        }
+      } else {
+         const user = await this.getUserById(userId);
+         if(user) {
+             const updated = { ...user, balance: user.balance + amount };
+             await this.updateUser(updated);
+             await this.createTransaction({
+                 id: Date.now().toString(), userId, userName: user.name, amount: Math.abs(amount),
+                 type: 'adjustment', status: 'completed', method: 'Admin', details: reason, timestamp: Date.now()
+             });
+         }
       }
   },
 
-  // --- Notifications ---
-  getNotifications: (userId: string) => {
-    const all = get<Notification>(KEYS.NOTIFICATIONS);
-    return all.filter(n => n.userId === 'all' || n.userId === userId).sort((a, b) => b.timestamp - a.timestamp);
+  // --- CAMPAIGNS ---
+  async getCampaigns(): Promise<Campaign[]> {
+    if (USE_SUPABASE) {
+      const { data, error } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false });
+      if (error) return [];
+      return data.map((c: any) => ({
+        ...c, creatorId: c.creator_id, creatorName: c.creator_name, targetUrl: c.target_url,
+        rewardPerTask: c.reward_per_task, totalBudget: c.total_budget, remainingBudget: c.remaining_budget,
+        completedCount: c.completed_count, createdAt: c.created_at
+      }));
+    } else {
+        return getLocal<Campaign[]>('campaigns', []);
+    }
   },
 
-  createNotification: (note: Notification) => {
-    const list = get<Notification>(KEYS.NOTIFICATIONS);
-    list.unshift(note);
-    set(KEYS.NOTIFICATIONS, list);
+  async createCampaign(campaign: Campaign) {
+    if (USE_SUPABASE) {
+      const { error } = await supabase.from('campaigns').insert([{
+        creator_id: campaign.creatorId, creator_name: campaign.creatorName,
+        platform: campaign.platform, type: campaign.type, title: campaign.title,
+        description: campaign.description, target_url: campaign.targetUrl,
+        reward_per_task: campaign.rewardPerTask, total_budget: campaign.totalBudget,
+        remaining_budget: campaign.remainingBudget, status: campaign.status, created_at: Date.now()
+      }]);
+      if(error) throw error;
+    } else {
+        const list = getLocal<Campaign[]>('campaigns', []);
+        list.unshift(campaign);
+        setLocal('campaigns', list);
+    }
   },
 
-  broadcastMessage: (message: string) => {
-    const list = get<Notification>(KEYS.NOTIFICATIONS);
-    list.unshift({
-      id: Date.now().toString(),
-      userId: 'all',
-      title: 'Admin Announcement',
-      message: message,
-      type: 'info',
-      read: false,
-      timestamp: Date.now()
-    });
-    set(KEYS.NOTIFICATIONS, list);
+  async deleteCampaign(id: string) {
+    if(USE_SUPABASE) await supabase.from('campaigns').delete().eq('id', id);
+    else {
+        const list = getLocal<Campaign[]>('campaigns', []);
+        setLocal('campaigns', list.filter(c => c.id !== id));
+    }
+  },
+
+  // --- TRANSACTIONS ---
+  async getTransactions(userId?: string): Promise<Transaction[]> {
+    if (USE_SUPABASE) {
+      let query = supabase.from('transactions').select('*').order('timestamp', { ascending: false });
+      if (userId) query = query.eq('user_id', userId);
+      const { data } = await query;
+      return (data || []).map((t: any) => ({ ...t, userId: t.user_id, userName: t.user_name }));
+    } else {
+        const list = getLocal<Transaction[]>('transactions', []);
+        return userId ? list.filter(t => t.userId === userId) : list;
+    }
+  },
+
+  async createTransaction(tx: Transaction) {
+    if (USE_SUPABASE) {
+      await supabase.from('transactions').insert([{
+        user_id: tx.userId, user_name: tx.userName, amount: tx.amount,
+        type: tx.type, status: tx.status, method: tx.method, details: tx.details, timestamp: Date.now()
+      }]);
+    } else {
+        const list = getLocal<Transaction[]>('transactions', []);
+        if(!tx.id) tx.id = Date.now().toString();
+        list.unshift(tx);
+        setLocal('transactions', list);
+    }
+  },
+
+  async updateTransactionStatus(id: string, status: string) {
+    if (USE_SUPABASE) await supabase.from('transactions').update({ status }).eq('id', id);
+    else {
+        const list = getLocal<Transaction[]>('transactions', []);
+        const idx = list.findIndex(t => t.id === id);
+        if(idx !== -1) {
+            list[idx].status = status as any;
+            setLocal('transactions', list);
+        }
+    }
+  },
+
+  // --- MEDIA ---
+  async uploadMedia(file: File): Promise<string> {
+    if (USE_SUPABASE) {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const { error } = await supabase.storage.from('socialpay-media').upload(fileName, file);
+      if (error) throw error;
+      const { data } = supabase.storage.from('socialpay-media').getPublicUrl(fileName);
+      return data.publicUrl;
+    } else {
+        // Mock IDB Storage
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                const idbUrl = await saveMediaToIDB(reader.result as string);
+                resolve(idbUrl);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+  },
+
+  // --- VIDEOS ---
+  async getVideos(): Promise<Video[]> {
+    if (USE_SUPABASE) {
+      const { data } = await supabase.from('videos').select('*').order('timestamp', { ascending: false });
+      return (data || []).map((v: any) => ({
+        ...v, userId: v.user_id, userName: v.user_name, userAvatar: v.user_avatar,
+        editingData: v.editing_data, comments: v.comments_count || 0
+      }));
+    } else {
+        return getLocal<Video[]>('videos', []);
+    }
+  },
+
+  async addVideo(video: Video) {
+    if (USE_SUPABASE) {
+      await supabase.from('videos').insert([{
+        user_id: video.userId, user_name: video.userName, user_avatar: video.userAvatar,
+        url: video.url, caption: video.caption, tags: video.tags, editing_data: video.editingData, timestamp: Date.now()
+      }]);
+    } else {
+        const list = getLocal<Video[]>('videos', []);
+        list.unshift(video);
+        setLocal('videos', list);
+    }
+  },
+
+  async deleteVideo(id: string) {
+    if(USE_SUPABASE) await supabase.from('videos').delete().eq('id', id);
+    else {
+        const list = getLocal<Video[]>('videos', []);
+        setLocal('videos', list.filter(v => v.id !== id));
+    }
+  },
+
+  async incrementVideoView(id: string) {
+    if(USE_SUPABASE) {
+       // RPC call preferred, here simulation via get/update
+    } else {
+        const list = getLocal<Video[]>('videos', []);
+        const v = list.find(v => v.id === id);
+        if(v) { v.views = (v.views || 0) + 1; setLocal('videos', list); }
+    }
+  },
+
+  // --- DRAFTS ---
+  async getDrafts(userId: string): Promise<Draft[]> {
+    if(USE_SUPABASE) {
+        // Mock implementation for draft if table doesn't exist yet, or real if it does
+        return []; 
+    } else {
+        const list = getLocal<Draft[]>('drafts', []);
+        return list.filter(d => d.userId === userId);
+    }
+  },
+
+  async saveDraft(draft: Draft) {
+    if(USE_SUPABASE) {
+        // ...
+    } else {
+        const list = getLocal<Draft[]>('drafts', []);
+        list.push(draft);
+        setLocal('drafts', list);
+    }
+  },
+
+  // --- GIGS ---
+  async getGigs(): Promise<Gig[]> {
+    if (USE_SUPABASE) {
+      const { data } = await supabase.from('gigs').select('*').order('timestamp', { ascending: false });
+      return (data || []).map((g: any) => ({ ...g, sellerId: g.seller_id, sellerName: g.seller_name, ratingCount: g.rating_count }));
+    } else {
+        return getLocal<Gig[]>('gigs', []);
+    }
+  },
+
+  async createGig(gig: Gig) {
+    if (USE_SUPABASE) {
+      await supabase.from('gigs').insert([{
+        seller_id: gig.sellerId, seller_name: gig.sellerName, title: gig.title,
+        description: gig.description, price: gig.price, category: gig.category, image: gig.image, timestamp: Date.now()
+      }]);
+    } else {
+        const list = getLocal<Gig[]>('gigs', []);
+        list.unshift(gig);
+        setLocal('gigs', list);
+    }
+  },
+
+  async deleteGig(id: string) {
+    if(USE_SUPABASE) await supabase.from('gigs').delete().eq('id', id);
+    else {
+        const list = getLocal<Gig[]>('gigs', []);
+        setLocal('gigs', list.filter(g => g.id !== id));
+    }
+  },
+
+  // --- COMMUNITY ---
+  async getCommunityPosts(): Promise<CommunityPost[]> {
+    if (USE_SUPABASE) {
+      const { data } = await supabase.from('community_posts').select('*, post_comments(*)').order('timestamp', { ascending: false });
+      return (data || []).map((p: any) => ({
+        ...p, userId: p.user_id, userName: p.user_name, userAvatar: p.user_avatar, likedBy: p.liked_by || [],
+        commentsList: p.post_comments?.map((c: any) => ({ ...c, userId: c.user_id, userName: c.user_name, userAvatar: c.user_avatar })) || []
+      }));
+    } else {
+        return getLocal<CommunityPost[]>('community_posts', []);
+    }
+  },
+
+  async createCommunityPost(post: CommunityPost) {
+    if (USE_SUPABASE) {
+      await supabase.from('community_posts').insert([{
+        user_id: post.userId, user_name: post.userName, user_avatar: post.userAvatar,
+        content: post.content, image: post.image, video: post.video, audio: post.audio, timestamp: Date.now()
+      }]);
+    } else {
+        const list = getLocal<CommunityPost[]>('community_posts', []);
+        list.unshift(post);
+        setLocal('community_posts', list);
+    }
+  },
+
+  async likeCommunityPost(postId: string, userId: string) {
+    if(USE_SUPABASE) {
+       // ...
+    } else {
+        const list = getLocal<CommunityPost[]>('community_posts', []);
+        const p = list.find(x => x.id === postId);
+        if(p) {
+            if(p.likedBy.includes(userId)) {
+                p.likedBy = p.likedBy.filter(id => id !== userId);
+                p.likes--;
+            } else {
+                p.likedBy.push(userId);
+                p.likes++;
+            }
+            setLocal('community_posts', list);
+        }
+    }
+  },
+
+  async commentOnCommunityPost(postId: string, comment: CommunityComment) {
+      if(USE_SUPABASE) {
+          await supabase.from('post_comments').insert([{
+              post_id: postId, user_id: comment.userId, user_name: comment.userName,
+              user_avatar: comment.userAvatar, text: comment.text, timestamp: comment.timestamp
+          }]);
+      } else {
+          const list = getLocal<CommunityPost[]>('community_posts', []);
+          const p = list.find(x => x.id === postId);
+          if(p) {
+              if(!p.commentsList) p.commentsList = [];
+              p.commentsList.push(comment);
+              p.comments++;
+              setLocal('community_posts', list);
+          }
+      }
+  },
+
+  // --- SOCIAL & NOTIFICATIONS ---
+  async toggleFollow(userId: string, targetId: string) {
+      if(USE_SUPABASE) {
+          // ...
+      } else {
+          const users = getLocal<User[]>('users', []);
+          const target = users.find(u => u.id === targetId);
+          if(target) {
+              if(!target.followers) target.followers = [];
+              if(target.followers.includes(userId)) target.followers = target.followers.filter(id => id !== userId);
+              else target.followers.push(userId);
+              setLocal('users', users);
+          }
+      }
+  },
+
+  async getMessages(u1: string, u2: string): Promise<ChatMessage[]> {
+    if(USE_SUPABASE) {
+        return []; // Chat requires realtime or tables
+    } else {
+        const msgs = getLocal<ChatMessage[]>('messages', []);
+        return msgs.filter(m => (m.senderId === u1 && m.receiverId === u2) || (m.senderId === u2 && m.receiverId === u1))
+                   .sort((a,b) => a.timestamp - b.timestamp);
+    }
+  },
+
+  async sendMessage(msg: ChatMessage) {
+      if(USE_SUPABASE) {
+          // ...
+      } else {
+          const list = getLocal<ChatMessage[]>('messages', []);
+          list.push(msg);
+          setLocal('messages', list);
+      }
+  },
+
+  async getNotifications(userId: string): Promise<Notification[]> {
+    if(USE_SUPABASE) {
+        const { data } = await supabase.from('notifications').select('*').or(`user_id.eq.${userId},user_id.eq.all`).order('timestamp', { ascending: false });
+        return (data || []).map((n: any) => ({...n, userId: n.user_id}));
+    } else {
+        const list = getLocal<Notification[]>('notifications', []);
+        return list.filter(n => n.userId === userId || n.userId === 'all');
+    }
+  },
+
+  async createNotification(n: Notification) {
+      if(USE_SUPABASE) {
+          await supabase.from('notifications').insert([{
+              user_id: n.userId, title: n.title, message: n.message, type: n.type, read: n.read, timestamp: n.timestamp
+          }]);
+      } else {
+          const list = getLocal<Notification[]>('notifications', []);
+          list.unshift(n);
+          setLocal('notifications', list);
+      }
+  },
+
+  async broadcastMessage(msg: string) {
+      this.createNotification({
+          id: Date.now().toString(), userId: 'all', title: 'Admin Broadcast',
+          message: msg, type: 'info', read: false, timestamp: Date.now()
+      });
   }
 };

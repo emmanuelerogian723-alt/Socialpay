@@ -1,97 +1,100 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { User, Role } from '../types';
 import { Button, Input, Card, Select } from './UIComponents';
 import { storageService } from '../services/storageService';
-import { Shield, Fingerprint } from 'lucide-react';
+import { Shield, Fingerprint, Mail, CheckCircle, ArrowRight } from 'lucide-react';
 
 interface AuthViewProps {
   onLogin: (user: User) => void;
 }
 
-const ADMIN_EMAIL = "emmanuelerog@gmail.com";
-const ADMIN_PASS = "Erog@0291";
-
 export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
-  const [isLogin, setIsLogin] = useState(true);
+  const [viewState, setViewState] = useState<'login' | 'signup' | 'confirm'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('engager');
   const [error, setError] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Check for biometric capability (simulation)
+  useEffect(() => {
+    if (window.PublicKeyCredential) {
+      setBiometricAvailable(true);
+    }
+  }, []);
+
+  const handleBiometricLogin = async () => {
+    setLoading(true);
+    // Simulate biometric delay
+    setTimeout(() => {
+        setLoading(false);
+        // For simulation, we'll just alert. In a real app, this uses WebAuthn
+        alert("Biometric scan successful! (Simulation)");
+        // Ideally, you'd fetch the last logged-in user credential here
+    }, 1500);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    // --- ADMIN CHECK ---
-    if (email === ADMIN_EMAIL) {
-      if (password === ADMIN_PASS) {
-        const adminUser = storageService.getUserByEmail(ADMIN_EMAIL);
-        // If first time admin login, create the record if not exists (already handled in seed, but safe check)
-        if (adminUser) {
-           onLogin(adminUser);
-           return;
+    try {
+      if (viewState === 'login') {
+        // Hardcoded Admin Check for specific request (Mock fallback primarily)
+        if (email === 'emmanuelerog@gmail.com' && password === 'Erog@0291') {
+           // In a real Supabase app, this user must exist in the DB with role 'admin'
+           // We will proceed with standard sign in, expecting the backend to return the correct role.
+        }
+
+        const user = await storageService.signIn(email, password);
+        if (user) {
+          onLogin(user);
+        } else {
+          setError("User data fetch failed. Please check your credentials.");
         }
       } else {
-        setError("Invalid Admin Credentials");
-        return;
+        // Sign Up
+        // If it's the specific admin email, force role to admin (for consistency)
+        const effectiveRole = email === 'emmanuelerog@gmail.com' ? 'admin' : role;
+        
+        await storageService.signUp(email, password, name, effectiveRole);
+        setViewState('confirm'); // Move to confirmation screen
       }
-    }
-
-    // --- NORMAL USER LOGIC ---
-    if (isLogin) {
-      const user = storageService.getUserByEmail(email);
-      if (user && user.role !== 'admin') {
-         // Simple password simulation (In real app, hash and check password)
-         onLogin(user);
-      } else {
-        setError("User not found or invalid credentials.");
-      }
-    } else {
-      // Sign Up
-      const existing = storageService.getUserByEmail(email);
-      if (existing) {
-        setError("Email already in use.");
-        return;
-      }
-      
-      const newUser: User = {
-        id: Math.random().toString(36).substr(2, 9),
-        email,
-        name,
-        avatar: `https://ui-avatars.com/api/?name=${name.replace(' ', '+')}&background=random`,
-        role: role === 'admin' ? 'engager' : role, // Prevent creating admin via signup
-        balance: 0,
-        xp: 0,
-        badges: [],
-        verificationStatus: 'unpaid', // New users must pay fee
-        joinedAt: Date.now(),
-        followers: [],
-        following: []
-      };
-
-      storageService.createUser(newUser);
-      onLogin(newUser);
+    } catch (err: any) {
+      setError(err.message || "Authentication failed. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleBiometricLogin = () => {
-      setIsScanning(true);
-      setTimeout(() => {
-          setIsScanning(false);
-          // Simulate Passkey finding the last logged in user or a demo user
-          // For demo purposes, we will try to find a random engager or admin if email is prefilled
-          if (email) {
-              const user = storageService.getUserByEmail(email);
-              if (user) {
-                  onLogin(user);
-                  return;
-              }
-          }
-          alert("Passkey simulation: Please enter your email first to identify the account.");
-      }, 1500);
-  };
+  // --- CONFIRMATION SCREEN ---
+  if (viewState === 'confirm') {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
+            <Card className="w-full max-w-md text-center p-8">
+                <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Mail className="w-8 h-8" />
+                </div>
+                <h2 className="text-2xl font-bold mb-2">Check your email</h2>
+                <p className="text-gray-500 mb-6">
+                    We've sent a confirmation link to <strong>{email}</strong>. 
+                    Please click the link in that email to verify your account.
+                </p>
+                <div className="bg-blue-50 text-blue-800 text-sm p-3 rounded-lg mb-6">
+                    <strong>Note for Admin:</strong> If you are signing up as <em>emmanuelerog@gmail.com</em>, 
+                    please ensure you confirm the email to access the Admin Dashboard.
+                </div>
+                <Button onClick={() => setViewState('login')} className="w-full">
+                    Return to Sign In <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+            </Card>
+        </div>
+      );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
@@ -102,12 +105,12 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
           </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Social Pay</h1>
           <p className="text-gray-500">
-            {isLogin ? 'Welcome back! Sign in to continue.' : 'Create an account to start earning.'}
+            {viewState === 'login' ? 'Welcome back! Sign in to continue.' : 'Create an account to start earning.'}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLogin && (
+          {viewState === 'signup' && (
              <div>
                <label className="block text-sm font-medium mb-1">Full Name</label>
                <Input 
@@ -141,7 +144,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
             />
           </div>
 
-          {!isLogin && (
+          {viewState === 'signup' && (
              <div>
                <label className="block text-sm font-medium mb-1">I want to...</label>
                <Select value={role} onChange={e => setRole(e.target.value as Role)}>
@@ -152,41 +155,37 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
           )}
 
           {error && (
-            <div className="p-3 bg-red-100 text-red-700 text-sm rounded-lg flex items-center">
-              <Shield className="w-4 h-4 mr-2" />
+            <div className="p-3 bg-red-100 text-red-700 text-sm rounded-lg flex items-center animate-slide-up">
+              <Shield className="w-4 h-4 mr-2 flex-shrink-0" />
               {error}
             </div>
           )}
 
-          <Button type="submit" className="w-full" size="lg">
-            {isLogin ? 'Sign In' : 'Create Account'}
+          <Button type="submit" className="w-full" size="lg" isLoading={loading}>
+            {viewState === 'login' ? 'Sign In' : 'Create Account'}
           </Button>
-
-          {isLogin && (
-              <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-white dark:bg-gray-800 text-gray-500">Or continue with</span>
-                  </div>
-              </div>
-          )}
-
-          {isLogin && (
-              <Button type="button" variant="outline" className="w-full" onClick={handleBiometricLogin} disabled={isScanning}>
-                 <Fingerprint className={`w-5 h-5 mr-2 ${isScanning ? 'animate-pulse text-indigo-500' : ''}`} />
-                 {isScanning ? 'Scanning...' : 'Biometric / Passkey'}
-              </Button>
+          
+          {viewState === 'login' && biometricAvailable && (
+              <button 
+                type="button"
+                onClick={handleBiometricLogin}
+                className="w-full flex items-center justify-center py-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-100"
+              >
+                  <Fingerprint className="w-5 h-5 mr-2" />
+                  Sign in with Passkey
+              </button>
           )}
         </form>
 
         <div className="mt-6 text-center text-sm">
           <button 
-            onClick={() => { setIsLogin(!isLogin); setError(''); }}
+            onClick={() => { 
+                setViewState(viewState === 'login' ? 'signup' : 'login'); 
+                setError(''); 
+            }}
             className="text-indigo-600 hover:text-indigo-500 font-medium"
           >
-            {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+            {viewState === 'login' ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
           </button>
         </div>
       </Card>

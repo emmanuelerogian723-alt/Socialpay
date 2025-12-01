@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Shield, AlertTriangle, Users, DollarSign, Check, X, Bell, RefreshCw, Edit, Lock, Wallet, ArrowDownLeft, FileText, Trash2, Download, BarChart2, Layers, Briefcase } from 'lucide-react';
 import { Card, Button, Badge, Input, Select } from './UIComponents';
@@ -27,13 +28,13 @@ const AdminView: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  const loadData = () => {
+  const loadData = async () => {
     setIsRefreshing(true);
-    setUsers(storageService.getUsers());
-    setTransactions(storageService.getTransactions());
-    setCampaigns(storageService.getCampaigns());
-    setVideos(storageService.getVideos());
-    setGigs(storageService.getGigs());
+    setUsers(await storageService.getUsers());
+    setTransactions(await storageService.getTransactions());
+    setCampaigns(await storageService.getCampaigns());
+    setVideos(await storageService.getVideos());
+    setGigs(await storageService.getGigs());
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
@@ -41,24 +42,24 @@ const AdminView: React.FC = () => {
     loadData();
   }, []);
 
-  const handleApproveWithdrawal = (txId: string) => {
+  const handleApproveWithdrawal = async (txId: string) => {
     if(confirm("Are you sure you want to approve this payout?")) {
-        storageService.updateTransactionStatus(txId, 'completed');
+        await storageService.updateTransactionStatus(txId, 'completed');
         loadData();
     }
   };
 
-  const handleRejectWithdrawal = (txId: string) => {
+  const handleRejectWithdrawal = async (txId: string) => {
     const tx = transactions.find(t => t.id === txId);
     if(tx && tx.status === 'pending') {
        if(confirm("Reject this withdrawal? Amount will be refunded to user.")) {
-          const freshUsers = storageService.getUsers();
+          const freshUsers = await storageService.getUsers();
           const user = freshUsers.find(u => u.id === tx.userId);
           
           if(user) {
             const updatedUser = { ...user, balance: user.balance + tx.amount };
-            storageService.updateUser(updatedUser);
-            storageService.updateTransactionStatus(txId, 'rejected');
+            await storageService.updateUser(updatedUser);
+            await storageService.updateTransactionStatus(txId, 'rejected');
             alert(`Withdrawal rejected. $${tx.amount} refunded to ${user.name}.`);
           }
           loadData();
@@ -66,35 +67,35 @@ const AdminView: React.FC = () => {
     }
   };
 
-  const handleApproveDeposit = (txId: string) => {
+  const handleApproveDeposit = async (txId: string) => {
     const tx = transactions.find(t => t.id === txId);
     if (tx && confirm(`Confirm receipt of $${tx.amount}? This will add funds to the user's wallet.`)) {
         // Find User
-        const freshUsers = storageService.getUsers();
+        const freshUsers = await storageService.getUsers();
         const user = freshUsers.find(u => u.id === tx.userId);
         if (user) {
              const updatedUser = { ...user, balance: user.balance + tx.amount };
-             storageService.updateUser(updatedUser);
-             storageService.updateTransactionStatus(txId, 'completed');
+             await storageService.updateUser(updatedUser);
+             await storageService.updateTransactionStatus(txId, 'completed');
              loadData();
              alert("Deposit approved and funds added.");
         }
     }
   };
 
-  const handleApproveFee = (txId: string) => {
+  const handleApproveFee = async (txId: string) => {
      const tx = transactions.find(t => t.id === txId);
      if (tx && confirm("Confirm receipt of Access Fee? This will verify the user.")) {
          // Find User
-         const freshUsers = storageService.getUsers();
+         const freshUsers = await storageService.getUsers();
          const user = freshUsers.find(u => u.id === tx.userId);
          if (user) {
               const updatedUser = { ...user, verificationStatus: 'verified' as const };
-              storageService.updateUser(updatedUser);
-              storageService.updateTransactionStatus(txId, 'completed');
+              await storageService.updateUser(updatedUser);
+              await storageService.updateTransactionStatus(txId, 'completed');
               
               // Notification
-              storageService.createNotification({
+              await storageService.createNotification({
                  id: Date.now().toString(),
                  userId: user.id,
                  title: 'Access Approved',
@@ -110,12 +111,12 @@ const AdminView: React.FC = () => {
      }
   };
 
-  const handleApproveVerification = (userId: string) => {
+  const handleApproveVerification = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (user) {
       const updatedUser = { ...user, verificationStatus: 'verified' as const };
-      storageService.updateUser(updatedUser);
-      storageService.createNotification({
+      await storageService.updateUser(updatedUser);
+      await storageService.createNotification({
          id: Date.now().toString(),
          userId: userId,
          title: 'Account Verified',
@@ -129,9 +130,9 @@ const AdminView: React.FC = () => {
     }
   };
 
-  const handleUpdateWallet = () => {
+  const handleUpdateWallet = async () => {
      if(editingUser && adjustAmount) {
-         storageService.adminAdjustBalance(editingUser.id, parseFloat(adjustAmount), adjustReason || 'Admin adjustment');
+         await storageService.adminAdjustBalance(editingUser.id, parseFloat(adjustAmount), adjustReason || 'Admin adjustment');
          setEditingUser(null);
          setAdjustAmount('');
          setAdjustReason('');
@@ -140,31 +141,31 @@ const AdminView: React.FC = () => {
      }
   };
 
-  const handleBroadcast = () => {
+  const handleBroadcast = async () => {
       if(broadcastMsg) {
-          storageService.broadcastMessage(broadcastMsg);
+          await storageService.broadcastMessage(broadcastMsg);
           setBroadcastMsg('');
           alert('Message sent to all users');
       }
   };
 
-  const handleDeleteCampaign = (id: string) => {
+  const handleDeleteCampaign = async (id: string) => {
       if(confirm("Permanently delete this campaign?")) {
-          storageService.deleteCampaign(id);
+          await storageService.deleteCampaign(id);
           loadData();
       }
   };
 
-  const handleDeleteVideo = (id: string) => {
+  const handleDeleteVideo = async (id: string) => {
       if(confirm("Permanently delete this reel?")) {
-          storageService.deleteVideo(id);
+          await storageService.deleteVideo(id);
           loadData();
       }
   };
 
-  const handleDeleteGig = (id: string) => {
+  const handleDeleteGig = async (id: string) => {
       if(confirm("Permanently delete this gig?")) {
-          storageService.deleteGig(id);
+          await storageService.deleteGig(id);
           loadData();
       }
   };

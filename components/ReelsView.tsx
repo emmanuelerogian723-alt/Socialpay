@@ -1,8 +1,7 @@
 
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Video, User, VideoEditingData, Draft, ChatMessage } from '../types';
-import { storageService } from '../services/storageService';
+import { storageService, loadMediaFromDB } from '../services/storageService';
 import { Card, Button, Input, Modal, Badge } from './UIComponents';
 import { Heart, MessageCircle, Share2, Plus, Play, X, Send, ArrowLeft, Grid, Users, Upload, Sparkles, Scissors, Type, Sticker, Music, Check, Volume2, VolumeX, Save, FileVideo, Eye, Clock, MessageSquare, Search } from 'lucide-react';
 
@@ -22,6 +21,53 @@ const FILTERS = [
 
 const EMOJIS = ['🔥', '❤️', '😂', '😍', '👏', '🎉', '👀', '💯', '✨', '🚀'];
 
+// --- SUB-COMPONENT: Async Video Player ---
+const VideoPlayer: React.FC<{ 
+    video: Video; 
+    isActive: boolean; 
+    muted: boolean;
+    onDoubleTap: (e: React.MouseEvent) => void;
+    setVideoRef: (el: HTMLVideoElement | null) => void;
+}> = ({ video, isActive, muted, onDoubleTap, setVideoRef }) => {
+    const [src, setSrc] = useState<string>('');
+
+    useEffect(() => {
+        const load = async () => {
+            if (video.url.startsWith('idb:')) {
+                const key = video.url.split(':')[1];
+                const data = await loadMediaFromDB(key);
+                setSrc(data || '');
+            } else {
+                setSrc(video.url);
+            }
+        };
+        load();
+    }, [video.url]);
+
+    if (!src) return <div className="w-full h-full bg-black flex items-center justify-center text-white">Loading...</div>;
+
+    return (
+        <video 
+            ref={setVideoRef}
+            src={src} 
+            className="w-full h-full object-cover" 
+            loop
+            muted={muted}
+            playsInline
+            onDoubleClick={onDoubleTap}
+            onTimeUpdate={(e) => {
+                if(video.editingData?.trim) {
+                    const v = e.currentTarget;
+                    if (v.currentTime > video.editingData.trim.end) {
+                        v.currentTime = video.editingData.trim.start;
+                    }
+                }
+            }}
+        />
+    );
+};
+
+
 const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   const [videos, setVideos] = useState<Video[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -35,6 +81,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   // Profile View State
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  const [profileData, setProfileData] = useState<{ user: User, videos: Video[], stats: any } | null>(null);
   
   // Chat State
   const [showChat, setShowChat] = useState(false);
@@ -55,9 +102,36 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   const observer = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
-    setVideos(storageService.getVideos());
-    setDrafts(storageService.getDrafts(user.id));
-  }, [user.id, viewingProfileId]); // Reload when profile view changes to update stats
+      const fetchData = async () => {
+          setVideos(await storageService.getVideos());
+          setDrafts(await storageService.getDrafts(user.id));
+      };
+      fetchData();
+  }, [user.id, viewingProfileId]);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+        if (!viewingProfileId) {
+            setProfileData(null);
+            return;
+        }
+        const profileUser = await storageService.getUserById(viewingProfileId);
+        if (!profileUser) return;
+        
+        const userVideos = videos.filter(v => v.userId === viewingProfileId);
+        const totalLikes = userVideos.reduce((acc, v) => acc + v.likes, 0);
+        const totalViews = userVideos.reduce((acc, v) => acc + (v.views || 0), 0);
+        const followersCount = profileUser.followers?.length || 0;
+        const isFollowing = profileUser.followers?.includes(user.id);
+
+        setProfileData({ 
+            user: profileUser, 
+            videos: userVideos, 
+            stats: { totalLikes, totalViews, followersCount, isFollowing } 
+        });
+    };
+    fetchProfile();
+  }, [viewingProfileId, videos, user.id]);
 
   // Autoplay & View Counting
   const handleObserver = useCallback((entries: IntersectionObserverEntry[]) => {
@@ -72,7 +146,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
           videoEl.currentTime = 0;
           videoEl.play().catch(() => {});
           
-          // Increment Views after 2 seconds of watch time
+          // Increment Views after 2 seconds
           setTimeout(() => {
              if(videoEl && !videoEl.paused) {
                  storageService.incrementVideoView(videoId);
@@ -121,10 +195,9 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
      handleLike(videoId, true);
   };
 
-  const handleFollow = (targetId: string) => {
-     storageService.toggleFollow(user.id, targetId);
-     // Force re-render of profile
-     setVideos(storageService.getVideos()); 
+  const handleFollow = async (targetId: string) => {
+     await storageService.toggleFollow(user.id, targetId);
+     setVideos(await storageService.getVideos()); 
   };
 
   const openComments = (video: Video) => {
@@ -153,12 +226,12 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   };
 
   // Chat Logic
-  const loadChat = (targetId: string) => {
-      setChatMessages(storageService.getMessages(user.id, targetId));
+  const loadChat = async (targetId: string) => {
+      setChatMessages(await storageService.getMessages(user.id, targetId));
       setShowChat(true);
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
       if(!chatInput || !viewingProfileId) return;
       const msg: ChatMessage = {
           id: Date.now().toString(),
@@ -167,7 +240,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
           text: chatInput,
           timestamp: Date.now()
       };
-      storageService.sendMessage(msg);
+      await storageService.sendMessage(msg);
       setChatMessages([...chatMessages, msg]);
       setChatInput('');
   };
@@ -204,7 +277,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
     }
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
       if (!newVideoFile) return;
       const draft: Draft = {
           id: Date.now().toString(),
@@ -215,8 +288,8 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
           editingData,
           timestamp: Date.now()
       };
-      storageService.saveDraft(draft);
-      setDrafts(storageService.getDrafts(user.id));
+      await storageService.saveDraft(draft);
+      setDrafts(await storageService.getDrafts(user.id));
       alert("Draft saved successfully!");
       setIsUploading(false);
       resetEditor();
@@ -248,7 +321,6 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
       // Simulate Upload Progress
       let progress = 0;
       const interval = setInterval(() => {
-         // Non-linear progress simulation
          const increment = Math.max(1, Math.floor(Math.random() * 5)); 
          progress = Math.min(progress + increment, 100);
          
@@ -256,13 +328,13 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
          
          if (progress >= 100) {
              clearInterval(interval);
-             // Small delay to ensure state updates
-             setTimeout(() => finalizePost(), 500);
+             // Trigger finalization logic
+             finalizePost();
          }
       }, 50);
   };
 
-  const finalizePost = () => {
+  const finalizePost = async () => {
       try {
           const tagList = tags.split(/[\s,]+/).filter(t => t).map(t => t.startsWith('#') ? t : `#${t}`);
           
@@ -282,14 +354,15 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
             timestamp: Date.now()
           };
 
-          storageService.addVideo(newVideo);
-          setVideos(storageService.getVideos());
+          await storageService.addVideo(newVideo);
+          
+          setVideos(await storageService.getVideos());
           setIsUploading(false);
           resetEditor();
           alert('Reel posted successfully!');
       } catch (e) {
           console.error("Failed to post video", e);
-          alert('Failed to post reel. Your browser storage might be full. Try a smaller video.');
+          alert('Failed to post reel. Please try a smaller video file.');
           setIsUploading(false);
           setUploadProgress(0);
       }
@@ -310,23 +383,6 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
       }));
       setInputText('');
   };
-
-  // Profile Data Helper
-  const getProfileData = () => {
-    if (!viewingProfileId) return null;
-    const profileUser = storageService.getUserById(viewingProfileId);
-    if (!profileUser) return null;
-    
-    // Calculate stats dynamically
-    const userVideos = videos.filter(v => v.userId === viewingProfileId);
-    const totalLikes = userVideos.reduce((acc, v) => acc + v.likes, 0);
-    const totalViews = userVideos.reduce((acc, v) => acc + (v.views || 0), 0);
-    const followersCount = profileUser.followers?.length || 0;
-    const isFollowing = profileUser.followers?.includes(user.id);
-
-    return { user: profileUser, videos: userVideos, stats: { totalLikes, totalViews, followersCount, isFollowing } };
-  };
-  const profileData = getProfileData();
 
   const filteredVideos = videos.filter(v => {
       if(!searchTerm) return true;
@@ -378,27 +434,14 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
                 data-videoid={video.id}
                 className="reel-video-container snap-start w-full h-full relative flex items-center justify-center bg-gray-900"
             >
-                {/* Video Player */}
-                <div 
-                    className={`relative w-full h-full ${video.editingData?.filter || ''}`}
-                    onDoubleClick={(e) => handleDoubleTap(e, video.id)}
-                >
-                    <video 
-                        ref={el => { videoRefs.current[video.id] = el; }}
-                        src={video.url} 
-                        className="w-full h-full object-cover" 
-                        loop
+                {/* Video Player Container */}
+                <div className={`relative w-full h-full ${video.editingData?.filter || ''}`}>
+                    <VideoPlayer 
+                        video={video}
+                        isActive={activeVideoId === video.id}
                         muted={muted}
-                        playsInline
-                        // Simulate trimming
-                        onTimeUpdate={(e) => {
-                            if(video.editingData?.trim) {
-                                const v = e.currentTarget;
-                                if (v.currentTime > video.editingData.trim.end) {
-                                    v.currentTime = video.editingData.trim.start;
-                                }
-                            }
-                        }}
+                        onDoubleTap={(e) => handleDoubleTap(e, video.id)}
+                        setVideoRef={(el) => { videoRefs.current[video.id] = el; }}
                     />
                     
                     {/* Overlays */}
@@ -776,8 +819,14 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
                   <div className="grid grid-cols-3 gap-0.5">
                       {profileData.videos.map(v => (
                           <div key={v.id} className="aspect-[3/4] bg-gray-100 dark:bg-gray-800 relative cursor-pointer" onClick={() => setSelectedVideo(v)}>
-                              <video src={v.url} className="w-full h-full object-cover" />
-                              <div className="absolute bottom-1 left-1 flex items-center text-white text-[10px] font-bold drop-shadow-md">
+                              <VideoPlayer 
+                                  video={v} 
+                                  isActive={false} 
+                                  muted={true} 
+                                  onDoubleTap={() => {}} 
+                                  setVideoRef={() => {}} 
+                              />
+                              <div className="absolute bottom-1 left-1 flex items-center text-white text-[10px] font-bold drop-shadow-md z-10">
                                   <Play className="w-3 h-3 mr-1 fill-white" /> {v.views}
                               </div>
                           </div>
@@ -801,21 +850,13 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
                     <ArrowLeft className="w-6 h-6" />
                 </button>
 
-                <div 
-                    className={`relative w-full h-full ${selectedVideo.editingData?.filter || ''}`}
-                    onDoubleClick={(e) => handleDoubleTap(e, selectedVideo.id)}
-                >
-                    <video 
-                        src={selectedVideo.url} 
-                        className="w-full h-full object-cover" 
-                        autoPlay
-                        loop
-                        playsInline
-                        controls={false}
-                        onClick={(e) => {
-                             const v = e.currentTarget;
-                             v.paused ? v.play() : v.pause();
-                        }}
+                <div className={`relative w-full h-full ${selectedVideo.editingData?.filter || ''}`}>
+                    <VideoPlayer 
+                        video={selectedVideo}
+                        isActive={true}
+                        muted={false}
+                        onDoubleTap={(e) => handleDoubleTap(e, selectedVideo.id)}
+                        setVideoRef={() => {}}
                     />
                      {/* Overlays */}
                     {selectedVideo.editingData?.stickers.map(s => (

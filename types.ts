@@ -130,6 +130,15 @@ export interface Gig {
   ratingCount?: number;
 }
 
+export interface CommunityComment {
+    id: string;
+    userId: string;
+    userName: string;
+    userAvatar: string;
+    text: string;
+    timestamp: number;
+}
+
 export interface CommunityPost {
   id: string;
   userId: string;
@@ -137,8 +146,11 @@ export interface CommunityPost {
   userAvatar: string;
   content: string;
   image?: string;
+  video?: string;
+  audio?: string;
   likes: number;
   comments: number;
+  commentsList?: CommunityComment[];
   timestamp: number;
   likedBy: string[]; // User IDs
 }
