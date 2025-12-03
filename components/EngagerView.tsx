@@ -389,9 +389,23 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
       <Modal 
         isOpen={!!verifyingTask} 
         onClose={closeVerifyModal}
-        title={`Verify Task: ${verifyingTask?.platform}`}
+        title={verificationResult?.success ? 'Task Completed!' : `Verify Task: ${verifyingTask?.platform}`}
         maxWidth="max-w-lg"
       >
+        {verificationResult?.success ? (
+          <div className="flex flex-col items-center justify-center py-10 animate-fade-in">
+             <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mb-4 animate-bounce">
+                <CheckCircle className="w-10 h-10" />
+             </div>
+             <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Awesome Job!</h3>
+             <p className="text-gray-500 dark:text-gray-400 text-center">{verificationResult.message}</p>
+             <div className="mt-6 flex items-center space-x-2 text-indigo-600 font-semibold bg-indigo-50 dark:bg-indigo-900/20 px-4 py-2 rounded-full">
+                <DollarSign className="w-4 h-4" />
+                <span>Reward Added</span>
+             </div>
+          </div>
+        ) : (
+           <>
             <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                 <p className="text-sm font-semibold">{verifyingTask?.title}</p>
                 <p className="text-xs text-green-600 font-bold mt-1">Reward: ${verifyingTask?.reward.toFixed(2)}</p>
@@ -438,6 +452,13 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
                     )}
                  </div>
               </div>
+              
+              {verificationResult && !verificationResult.success && (
+                  <div className="p-3 bg-red-100 text-red-700 text-sm rounded-lg flex items-start animate-slide-up">
+                      <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0 mt-0.5" />
+                      <span>{verificationResult.message}</span>
+                  </div>
+               )}
             </div>
 
             <div className="flex justify-end space-x-2 pt-6 border-t border-gray-100 dark:border-gray-700 mt-4">
@@ -446,6 +467,8 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
                 Submit Proof
               </Button>
             </div>
+           </>
+        )}
       </Modal>
     </div>
   );

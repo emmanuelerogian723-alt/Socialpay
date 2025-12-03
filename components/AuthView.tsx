@@ -4,6 +4,7 @@ import { User, Role } from '../types';
 import { Button, Input, Card, Select } from './UIComponents';
 import { storageService } from '../services/storageService';
 import { Shield, Fingerprint, Mail, CheckCircle, ArrowRight } from 'lucide-react';
+import { isSupabaseConfigured } from '../services/supabaseClient';
 
 interface AuthViewProps {
   onLogin: (user: User) => void;
@@ -54,7 +55,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
         if (user) {
           onLogin(user);
         } else {
-          setError("User data fetch failed. Please check your credentials.");
+          setError("User data fetch failed. If you just signed up, please check your email for confirmation.");
         }
       } else {
         // Sign Up
@@ -62,7 +63,14 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
         const effectiveRole = email === 'emmanuelerog@gmail.com' ? 'admin' : role;
         
         await storageService.signUp(email, password, name, effectiveRole);
-        setViewState('confirm'); // Move to confirmation screen
+        
+        if (isSupabaseConfigured()) {
+            setViewState('confirm'); // Move to confirmation screen for Supabase
+        } else {
+            // Mock mode logs in immediately
+            const user = await storageService.signIn(email, password);
+            if(user) onLogin(user);
+        }
       }
     } catch (err: any) {
       setError(err.message || "Authentication failed. Please try again.");
@@ -84,6 +92,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                     We've sent a confirmation link to <strong>{email}</strong>. 
                     Please click the link in that email to verify your account.
                 </p>
+                <div className="text-xs text-gray-400 mb-6">
+                    Tip: If you are testing locally, ensure your Supabase "Site URL" is configured correctly in the dashboard.
+                </div>
                 <div className="bg-blue-50 text-blue-800 text-sm p-3 rounded-lg mb-6">
                     <strong>Note for Admin:</strong> If you are signing up as <em>emmanuelerog@gmail.com</em>, 
                     please ensure you confirm the email to access the Admin Dashboard.

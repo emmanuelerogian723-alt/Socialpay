@@ -12,6 +12,7 @@ import SettingsView from './components/SettingsView';
 import { AuthView } from './components/AuthView';
 import { ToastContainer } from './components/UIComponents';
 import { storageService } from './services/storageService';
+import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 
 type ViewState = 'dashboard' | 'reels' | 'gigs' | 'community' | 'settings';
 
@@ -23,8 +24,30 @@ const App: React.FC = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
 
-  // Load User Session (Supabase doesn't need manual localStorage for user ID)
-  // Auth state persists via supabase client internally
+  // Load User Session & Handle Email Redirects
+  useEffect(() => {
+    const initSession = async () => {
+        // 1. Check active session
+        const sessionUser = await storageService.getSession();
+        if (sessionUser) {
+            setUser(sessionUser);
+        }
+
+        // 2. Listen for Auth Changes (e.g., clicking confirmation link in email)
+        if (isSupabaseConfigured()) {
+            const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+                if (event === 'SIGNED_IN' && session?.user) {
+                    const profile = await storageService.getUserById(session.user.id);
+                    if (profile) setUser(profile);
+                } else if (event === 'SIGNED_OUT') {
+                    setUser(null);
+                }
+            });
+            return () => subscription.unsubscribe();
+        }
+    };
+    initSession();
+  }, []);
 
   // Poll for notifications
   useEffect(() => {

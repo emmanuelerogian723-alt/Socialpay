@@ -56,7 +56,10 @@ export const storageService = {
       const avatar = `https://ui-avatars.com/api/?name=${name.replace(' ', '+')}&background=random`;
       const { data, error } = await supabase.auth.signUp({
         email, password,
-        options: { data: { name, role, avatar } }
+        options: { 
+            data: { name, role, avatar },
+            emailRedirectTo: window.location.origin // Redirect back to current page
+        }
       });
       if (error) throw error;
       return data;
@@ -98,17 +101,38 @@ export const storageService = {
     else localStorage.removeItem('currentUser');
   },
 
+  async getSession() {
+      if (USE_SUPABASE) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+              return this.getUserById(session.user.id);
+          }
+          return null;
+      } else {
+          return getLocal<User | null>('currentUser', null);
+      }
+  },
+
   // --- USERS ---
   async getUserById(id: string): Promise<User | null> {
     if (USE_SUPABASE) {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', id).single();
-      if (error) return null;
-      return {
-        ...data,
-        verificationStatus: data.verification_status,
-        joinedAt: data.joined_at,
-        totalViews: 0, totalLikes: 0
-      } as User;
+      try {
+        const { data, error } = await supabase.from('profiles').select('*').eq('id', id).single();
+        if (error) {
+            console.error("Supabase Error getting user:", error);
+            return null;
+        }
+        return {
+            ...data,
+            verificationStatus: data.verification_status,
+            joinedAt: data.joined_at,
+            totalViews: 0, 
+            totalLikes: 0
+        } as User;
+      } catch (err) {
+          console.error("Unexpected error fetching user", err);
+          return null;
+      }
     } else {
         const users = getLocal<User[]>('users', []);
         return users.find(u => u.id === id) || null;
@@ -122,14 +146,13 @@ export const storageService = {
         bio: user.bio, xp: user.xp, verification_status: user.verificationStatus,
         followers: user.followers
       }).eq('id', user.id);
-      if (error) throw error;
+      if (error) console.error("Error updating user", error);
     } else {
         const users = getLocal<User[]>('users', []);
         const idx = users.findIndex(u => u.id === user.id);
         if(idx !== -1) {
             users[idx] = { ...users[idx], ...user };
             setLocal('users', users);
-            // Update current user if matches
             const current = getLocal<User>('currentUser', {} as User);
             if(current.id === user.id) setLocal('currentUser', users[idx]);
         }
@@ -138,7 +161,8 @@ export const storageService = {
 
   async getUsers(): Promise<User[]> {
     if (USE_SUPABASE) {
-      const { data } = await supabase.from('profiles').select('*');
+      const { data, error } = await supabase.from('profiles').select('*');
+      if (error) { console.error("Error fetching users", error); return []; }
       return (data || []).map((u: any) => ({
         ...u, verificationStatus: u.verification_status, joinedAt: u.joined_at
       }));
@@ -176,7 +200,7 @@ export const storageService = {
   async getCampaigns(): Promise<Campaign[]> {
     if (USE_SUPABASE) {
       const { data, error } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false });
-      if (error) return [];
+      if (error) { console.error("Error fetching campaigns", error); return []; }
       return data.map((c: any) => ({
         ...c, creatorId: c.creator_id, creatorName: c.creator_name, targetUrl: c.target_url,
         rewardPerTask: c.reward_per_task, totalBudget: c.total_budget, remainingBudget: c.remaining_budget,
@@ -217,7 +241,8 @@ export const storageService = {
     if (USE_SUPABASE) {
       let query = supabase.from('transactions').select('*').order('timestamp', { ascending: false });
       if (userId) query = query.eq('user_id', userId);
-      const { data } = await query;
+      const { data, error } = await query;
+      if (error) { console.error("Error fetching tx", error); return []; }
       return (data || []).map((t: any) => ({ ...t, userId: t.user_id, userName: t.user_name }));
     } else {
         const list = getLocal<Transaction[]>('transactions', []);
@@ -276,7 +301,8 @@ export const storageService = {
   // --- VIDEOS ---
   async getVideos(): Promise<Video[]> {
     if (USE_SUPABASE) {
-      const { data } = await supabase.from('videos').select('*').order('timestamp', { ascending: false });
+      const { data, error } = await supabase.from('videos').select('*').order('timestamp', { ascending: false });
+      if (error) return [];
       return (data || []).map((v: any) => ({
         ...v, userId: v.user_id, userName: v.user_name, userAvatar: v.user_avatar,
         editingData: v.editing_data, comments: v.comments_count || 0
@@ -341,7 +367,8 @@ export const storageService = {
   // --- GIGS ---
   async getGigs(): Promise<Gig[]> {
     if (USE_SUPABASE) {
-      const { data } = await supabase.from('gigs').select('*').order('timestamp', { ascending: false });
+      const { data, error } = await supabase.from('gigs').select('*').order('timestamp', { ascending: false });
+      if (error) return [];
       return (data || []).map((g: any) => ({ ...g, sellerId: g.seller_id, sellerName: g.seller_name, ratingCount: g.rating_count }));
     } else {
         return getLocal<Gig[]>('gigs', []);
@@ -372,7 +399,8 @@ export const storageService = {
   // --- COMMUNITY ---
   async getCommunityPosts(): Promise<CommunityPost[]> {
     if (USE_SUPABASE) {
-      const { data } = await supabase.from('community_posts').select('*, post_comments(*)').order('timestamp', { ascending: false });
+      const { data, error } = await supabase.from('community_posts').select('*, post_comments(*)').order('timestamp', { ascending: false });
+      if (error) return [];
       return (data || []).map((p: any) => ({
         ...p, userId: p.user_id, userName: p.user_name, userAvatar: p.user_avatar, likedBy: p.liked_by || [],
         commentsList: p.post_comments?.map((c: any) => ({ ...c, userId: c.user_id, userName: c.user_name, userAvatar: c.user_avatar })) || []
