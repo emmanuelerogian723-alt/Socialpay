@@ -85,6 +85,7 @@ export const storageService = {
     if (USE_SUPABASE) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      // We wait briefly to ensure session is set before fetching profile
       return this.getUserById(data.user.id);
     } else {
         // Mock Login
@@ -118,17 +119,63 @@ export const storageService = {
     if (USE_SUPABASE) {
       try {
         const { data, error } = await supabase.from('profiles').select('*').eq('id', id).single();
-        if (error) {
-            console.error("Supabase Error getting user:", error);
+        
+        // If profile found, return it
+        if (data) {
+             return {
+                ...data,
+                verificationStatus: data.verification_status,
+                joinedAt: data.joined_at,
+                totalViews: 0, 
+                totalLikes: 0
+            } as User;
+        }
+
+        // AUTO-RECOVERY: If profile NOT found (likely first login after email confirm), check auth user
+        // This acts as a client-side trigger to create the profile
+        if (!data || error) {
+            const { data: { user } } = await supabase.auth.getUser();
+            
+            // Only create profile if the requested ID matches the currently authenticated user
+            if (user && user.id === id) {
+                console.log("Profile not found in DB, creating from Auth Metadata...");
+                
+                const metadata = user.user_metadata || {};
+                const newProfile = {
+                    id: user.id,
+                    email: user.email,
+                    name: metadata.name || user.email?.split('@')[0] || 'User',
+                    avatar: metadata.avatar || `https://ui-avatars.com/api/?name=${(metadata.name || 'User').replace(' ', '+')}&background=random`,
+                    role: metadata.role || 'engager',
+                    balance: 0,
+                    xp: 0,
+                    badges: [],
+                    verification_status: 'unpaid',
+                    joined_at: Date.now(),
+                    followers: [],
+                    following: []
+                };
+
+                // Insert into profiles table
+                const { error: insertError } = await supabase.from('profiles').insert([newProfile]);
+                
+                if (insertError) {
+                    console.error("Failed to create profile:", insertError);
+                    return null;
+                }
+
+                // Return the newly created profile structure
+                return {
+                    ...newProfile,
+                    verificationStatus: newProfile.verification_status,
+                    joinedAt: newProfile.joined_at,
+                 } as User;
+            }
+            
+            console.error("Supabase Error getting user (and not current auth user):", error);
             return null;
         }
-        return {
-            ...data,
-            verificationStatus: data.verification_status,
-            joinedAt: data.joined_at,
-            totalViews: 0, 
-            totalLikes: 0
-        } as User;
+        return null; // Should not reach here if data exists
       } catch (err) {
           console.error("Unexpected error fetching user", err);
           return null;
