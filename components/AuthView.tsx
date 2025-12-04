@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Role } from '../types';
 import { Button, Input, Card, Select } from './UIComponents';
 import { storageService } from '../services/storageService';
-import { Shield, Fingerprint, Mail, CheckCircle, ArrowRight } from 'lucide-react';
+import { Shield, Fingerprint, Mail, ArrowRight } from 'lucide-react';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 
 interface AuthViewProps {
@@ -45,31 +45,48 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
 
     try {
       if (viewState === 'login') {
-        // Hardcoded Admin Check for specific request (Mock fallback primarily)
-        if (email === 'emmanuelerog@gmail.com' && password === 'Erog@0291') {
-           // In a real Supabase app, this user must exist in the DB with role 'admin'
-           // We will proceed with standard sign in, expecting the backend to return the correct role.
-        }
-
         const user = await storageService.signIn(email, password);
         if (user) {
           onLogin(user);
         } else {
-          setError("User data fetch failed. If you just signed up, please check your email for confirmation.");
+          setError("User data fetch failed. If you just signed up, please wait a moment or try logging in again.");
         }
       } else {
-        // Sign Up
-        // If it's the specific admin email, force role to admin (for consistency)
+        // --- SIGN UP FLOW ---
         const effectiveRole = email === 'emmanuelerog@gmail.com' ? 'admin' : role;
         
-        await storageService.signUp(email, password, name, effectiveRole);
+        // 1. Create the account
+        const signUpResult = await storageService.signUp(email, password, name, effectiveRole);
         
-        if (isSupabaseConfigured()) {
-            setViewState('confirm'); // Move to confirmation screen for Supabase
-        } else {
-            // Mock mode logs in immediately
+        // 2. Attempt immediate auto-login
+        try {
+            // Case A: Supabase returned a session immediately (Auto-Confirm ON)
+            if (isSupabaseConfigured() && signUpResult?.session) {
+                // Short delay to ensure profile trigger has fired
+                await new Promise(r => setTimeout(r, 1000));
+                
+                const user = await storageService.getUserById(signUpResult.user!.id);
+                if (user) {
+                    onLogin(user);
+                    return;
+                }
+            }
+
+            // Case B: No session returned OR Mock Mode -> Try explicit sign in
+            // This works if you have the auto-confirm trigger running on Supabase
             const user = await storageService.signIn(email, password);
-            if(user) onLogin(user);
+            if (user) {
+                onLogin(user);
+                return;
+            }
+        } catch (loginError: any) {
+             // Case C: Login failed because backend STRICTLY requires email verification
+             if (loginError.message?.includes('Email not confirmed')) {
+                 setViewState('confirm');
+                 return;
+             }
+             // Other errors (e.g. network)
+             throw loginError;
         }
       }
     } catch (err: any) {
@@ -79,7 +96,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     }
   };
 
-  // --- CONFIRMATION SCREEN ---
+  // --- CONFIRMATION SCREEN (Only shown if auto-login fails due to restriction) ---
   if (viewState === 'confirm') {
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
@@ -92,12 +109,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                     We've sent a confirmation link to <strong>{email}</strong>. 
                     Please click the link in that email to verify your account.
                 </p>
-                <div className="text-xs text-gray-400 mb-6">
-                    Tip: If you are testing locally, ensure your Supabase "Site URL" is configured correctly in the dashboard.
-                </div>
-                <div className="bg-blue-50 text-blue-800 text-sm p-3 rounded-lg mb-6">
-                    <strong>Note for Admin:</strong> If you are signing up as <em>emmanuelerog@gmail.com</em>, 
-                    please ensure you confirm the email to access the Admin Dashboard.
+                <div className="bg-yellow-50 text-yellow-800 text-sm p-3 rounded-lg mb-6 text-left">
+                    <strong>Tip:</strong> If you want to skip this step in the future, please ask the Admin to enable "Auto Confirm" in the database settings.
                 </div>
                 <Button onClick={() => setViewState('login')} className="w-full">
                     Return to Sign In <ArrowRight className="w-4 h-4 ml-2" />
