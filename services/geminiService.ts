@@ -5,9 +5,8 @@ let aiInstance: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!aiInstance) {
-    const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : '';
-    // Fallback if key is missing to avoid crashing immediately, though calls will fail
-    aiInstance = new GoogleGenAI({ apiKey: apiKey || 'MISSING_KEY' });
+    // Using the explicitly provided API key
+    aiInstance = new GoogleGenAI({ apiKey: "AIzaSyA7Y_eBv29MVK68w3Xbq1fJlCRr25nwvsU" });
   }
   return aiInstance;
 };
@@ -26,6 +25,8 @@ export const verifyEngagementProof = async (
     const model = "gemini-2.5-flash";
     const ai = getAI();
     
+    if (!ai) throw new Error("AI client not initialized");
+
     const prompt = `
       You are an AI Fraud Detection Agent for a social media engagement marketplace.
       
@@ -81,6 +82,7 @@ export const verifyEngagementProof = async (
 export const generateCampaignInsights = async (campaignTitle: string, platform: string, completions: number) => {
   try {
      const ai = getAI();
+     if (!ai) throw new Error("AI client not initialized");
      const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: `Provide 3 short, punchy tips to improve engagement for a ${platform} campaign titled "${campaignTitle}" which currently has ${completions} completions. Keep it under 50 words total.`
