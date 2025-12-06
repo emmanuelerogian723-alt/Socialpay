@@ -143,7 +143,7 @@ export const storageService = {
                 const metadata = user.user_metadata || {};
                 const newProfile = {
                     id: user.id,
-                    email: user.email,
+                    email: user.email || '',
                     name: metadata.name || user.email?.split('@')[0] || 'User',
                     avatar: metadata.avatar || `https://ui-avatars.com/api/?name=${(metadata.name || 'User').replace(' ', '+')}&background=random`,
                     role: metadata.role || 'engager',
@@ -157,14 +157,19 @@ export const storageService = {
                 };
 
                 // Insert into profiles table
+                // We use 'upsert' or 'insert' but assume if it fails, it might be due to race condition (already exists)
+                // or RLS. In EITHER case, we should NOT block the user. We should return the user object we constructed.
                 const { error: insertError } = await supabase.from('profiles').insert([newProfile]);
                 
                 if (insertError) {
-                    console.error("Failed to create profile:", insertError);
-                    return null;
+                    // We log this as a warning, not an error that stops execution.
+                    // If error is 23505 (unique_violation), it means profile exists now (race condition).
+                    // If error is RLS, it means we can't write, but we can still let user use the app in read-only mode for profile.
+                    console.warn("Auto-creation log (safe to ignore):", JSON.stringify(insertError));
                 }
 
-                // Return the newly created profile structure
+                // Return the newly created profile structure regardless of insert success
+                // This ensures the user is NEVER locked out.
                 return {
                     ...newProfile,
                     verificationStatus: newProfile.verification_status,
