@@ -1,5 +1,4 @@
 
-
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage } from '../types';
 
@@ -105,11 +104,28 @@ export const storageService = {
 
   async getSession() {
       if (USE_SUPABASE) {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-              return this.getUserById(session.user.id);
+          try {
+            const { data: { session }, error } = await supabase.auth.getSession();
+            
+            if (error) {
+                // Fix for "Invalid Refresh Token" loop
+                if (error.message.includes("Refresh Token Not Found") || error.message.includes("Invalid Refresh Token")) {
+                    console.warn("Detected stale session. Clearing local storage to recover.");
+                    await supabase.auth.signOut();
+                    return null;
+                }
+                console.error("Session check error:", error);
+                return null;
+            }
+
+            if (session?.user) {
+                return this.getUserById(session.user.id);
+            }
+            return null;
+          } catch (err) {
+              console.error("Unexpected session handling error:", err);
+              return null;
           }
-          return null;
       } else {
           return getLocal<User | null>('currentUser', null);
       }
@@ -135,10 +151,11 @@ export const storageService = {
         // AUTO-RECOVERY: If profile NOT found (likely first login after email confirm), check auth user
         // This acts as a client-side trigger to create the profile
         if (!data || error) {
-            const { data: { user } } = await supabase.auth.getUser();
-            
+            const { data: authData, error: authError } = await supabase.auth.getUser();
+            const user = authData?.user;
+
             // Only create profile if the requested ID matches the currently authenticated user
-            if (user && user.id === id) {
+            if (user && user.id === id && !authError) {
                 console.log("Profile not found in DB, creating from Auth Metadata...");
                 
                 const metadata = user.user_metadata || {};
@@ -170,7 +187,6 @@ export const storageService = {
                  } as User;
             }
             
-            console.error("Supabase Error getting user (and not current auth user):", error);
             return null;
         }
         return null; // Should not reach here if data exists
