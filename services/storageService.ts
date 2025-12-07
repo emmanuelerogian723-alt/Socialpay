@@ -159,7 +159,7 @@ export const storageService = {
 
                 const { error: insertError } = await supabase.from('profiles').insert([newProfile]);
                 
-                if (insertError) {
+                if (insertError && insertError.code !== '23505') { // Ignore unique violation if parallel creation
                     console.warn("Auto-creation log (safe to ignore):", JSON.stringify(insertError));
                 }
 
@@ -384,16 +384,25 @@ export const storageService = {
   },
 
   // --- VIDEOS ---
-  async getVideos(): Promise<Video[]> {
+  async getVideos(page: number = 0, limit: number = 5): Promise<Video[]> {
     if (USE_SUPABASE) {
-      const { data, error } = await supabase.from('videos').select('*').order('timestamp', { ascending: false });
+      const from = page * limit;
+      const to = from + limit - 1;
+      const { data, error } = await supabase
+          .from('videos')
+          .select('*')
+          .order('timestamp', { ascending: false })
+          .range(from, to);
+          
       if (error) return [];
       return (data || []).map((v: any) => ({
         ...v, userId: v.user_id, userName: v.user_name, userAvatar: v.user_avatar,
         editingData: v.editing_data, comments: v.comments_count || 0
       }));
     } else {
-        return getLocal<Video[]>('videos', []);
+        const list = getLocal<Video[]>('videos', []);
+        const start = page * limit;
+        return list.slice(start, start + limit);
     }
   },
 

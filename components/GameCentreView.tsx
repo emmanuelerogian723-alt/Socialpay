@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { User } from '../types';
-import { Button, Badge, Card, Input } from './UIComponents';
+import { Button, Badge, Card, Input, Modal } from './UIComponents';
 import { storageService } from '../services/storageService';
-import { Wifi, Users, Zap, Trophy, Play, Cpu, Gamepad2, Brain, Puzzle, Calculator, Clock, CheckCircle, XCircle, ArrowLeft, Star, MessageSquare, Send } from 'lucide-react';
+import { Wifi, Users, Zap, Trophy, Play, Cpu, Gamepad2, Brain, Puzzle, Calculator, Clock, CheckCircle, XCircle, ArrowLeft, Star, MessageSquare, Send, BookOpen, MousePointer2, AlertTriangle, Check } from 'lucide-react';
 
 interface GameCentreViewProps {
   user: User;
@@ -11,6 +11,138 @@ interface GameCentreViewProps {
 }
 
 type GameType = 'none' | 'cyber-slash' | 'word-hunt' | 'math-master';
+
+// --- VISUAL GAME GUIDE MODAL ---
+const GameGuideModal: React.FC<{ isOpen: boolean, onClose: () => void }> = ({ isOpen, onClose }) => {
+    const [activeTab, setActiveTab] = useState<'cyber' | 'word' | 'math'>('cyber');
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Game Manual & Rules" maxWidth="max-w-2xl">
+            <div className="flex flex-col h-full">
+                {/* Tabs */}
+                <div className="flex space-x-2 border-b border-gray-200 dark:border-gray-700 pb-2 mb-4">
+                    <button 
+                        onClick={() => setActiveTab('cyber')}
+                        className={`flex-1 pb-2 text-sm font-bold border-b-2 transition-colors ${activeTab === 'cyber' ? 'border-cyan-500 text-cyan-600' : 'border-transparent text-gray-400'}`}
+                    >
+                        Cyber Slash
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('word')}
+                        className={`flex-1 pb-2 text-sm font-bold border-b-2 transition-colors ${activeTab === 'word' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-400'}`}
+                    >
+                        Word Hunt
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('math')}
+                        className={`flex-1 pb-2 text-sm font-bold border-b-2 transition-colors ${activeTab === 'math' ? 'border-yellow-500 text-yellow-600' : 'border-transparent text-gray-400'}`}
+                    >
+                        Math Master
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="space-y-6">
+                    {activeTab === 'cyber' && (
+                        <div className="animate-fade-in space-y-6">
+                            <div className="bg-gray-900 rounded-xl p-6 text-center border border-cyan-500/30 relative overflow-hidden">
+                                <div className="absolute inset-0 bg-cyan-500/5 z-0"></div>
+                                <h3 className="text-xl font-bold text-white relative z-10 mb-4">Objective: Slice & Survive</h3>
+                                <div className="flex justify-center items-end gap-8 relative z-10">
+                                    <div className="flex flex-col items-center">
+                                        <div className="w-12 h-12 rounded-full bg-cyan-400 shadow-[0_0_20px_cyan] mb-2 animate-bounce-soft"></div>
+                                        <span className="text-xs text-cyan-300 font-bold">Data Orb</span>
+                                        <span className="text-xs text-white">+100 Pts</span>
+                                    </div>
+                                    <div className="flex flex-col items-center">
+                                        <div className="w-10 h-10 rounded-full bg-yellow-400 shadow-[0_0_20px_yellow] mb-2 animate-pulse"></div>
+                                        <span className="text-xs text-yellow-300 font-bold">Gold Data</span>
+                                        <span className="text-xs text-white">+500 Pts</span>
+                                    </div>
+                                    <div className="flex flex-col items-center">
+                                        <div className="w-14 h-14 rounded-full bg-red-500 shadow-[0_0_20px_red] mb-2 flex items-center justify-center text-2xl">☠️</div>
+                                        <span className="text-xs text-red-400 font-bold">Glitch Bomb</span>
+                                        <span className="text-xs text-white">-500 Pts</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                    <div className="font-bold flex items-center mb-1 text-gray-900 dark:text-white"><MousePointer2 className="w-4 h-4 mr-2"/> How to Play</div>
+                                    <p className="text-gray-500">Click and drag (or swipe) across the screen to create a blade trail. Slice the orbs before they fall.</p>
+                                </div>
+                                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                    <div className="font-bold flex items-center mb-1 text-gray-900 dark:text-white"><AlertTriangle className="w-4 h-4 mr-2"/> Warning</div>
+                                    <p className="text-gray-500">Do NOT slice the Red Glitch Bombs. They will deduct points instantly.</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'word' && (
+                        <div className="animate-fade-in space-y-6">
+                            <div className="bg-gray-900 rounded-xl p-6 text-center border border-purple-500/30 relative overflow-hidden">
+                                <div className="absolute inset-0 bg-purple-500/5 z-0"></div>
+                                <h3 className="text-xl font-bold text-white relative z-10 mb-4">Objective: Find Hidden Words</h3>
+                                <div className="w-32 mx-auto grid grid-cols-3 gap-1 relative z-10">
+                                    <div className="w-10 h-10 bg-green-500 text-black font-bold flex items-center justify-center rounded">C</div>
+                                    <div className="w-10 h-10 bg-green-500 text-black font-bold flex items-center justify-center rounded">A</div>
+                                    <div className="w-10 h-10 bg-green-500 text-black font-bold flex items-center justify-center rounded">T</div>
+                                    <div className="w-10 h-10 bg-white/10 text-gray-500 flex items-center justify-center rounded">X</div>
+                                    <div className="w-10 h-10 bg-white/10 text-gray-500 flex items-center justify-center rounded">Y</div>
+                                    <div className="w-10 h-10 bg-white/10 text-gray-500 flex items-center justify-center rounded">Z</div>
+                                </div>
+                                <div className="mt-2 text-green-400 font-bold text-sm relative z-10">Drag to Select</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                    <div className="font-bold flex items-center mb-1 text-gray-900 dark:text-white"><MousePointer2 className="w-4 h-4 mr-2"/> Controls</div>
+                                    <p className="text-gray-500">Click and drag horizontally or vertically to highlight letters. Release to submit.</p>
+                                </div>
+                                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                    <div className="font-bold flex items-center mb-1 text-gray-900 dark:text-white"><Star className="w-4 h-4 mr-2"/> Scoring</div>
+                                    <p className="text-gray-500">Find all words from the bottom list before time runs out. Each word gives 200 points.</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'math' && (
+                        <div className="animate-fade-in space-y-6">
+                            <div className="bg-gray-900 rounded-xl p-6 text-center border border-yellow-500/30 relative overflow-hidden">
+                                <div className="absolute inset-0 bg-yellow-500/5 z-0"></div>
+                                <h3 className="text-xl font-bold text-white relative z-10 mb-4">Objective: Speed Logic</h3>
+                                <div className="flex justify-center gap-4 relative z-10">
+                                    <div className="bg-gray-800 p-4 rounded-lg border border-gray-600">
+                                        <div className="text-2xl font-bold text-white">5 + ? = 12</div>
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                        <div className="bg-green-500 text-black px-4 py-1 rounded font-bold">7</div>
+                                        <div className="bg-red-900/50 text-gray-500 px-4 py-1 rounded">4</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                    <div className="font-bold flex items-center mb-1 text-gray-900 dark:text-white"><Brain className="w-4 h-4 mr-2"/> Challenge Types</div>
+                                    <p className="text-gray-500">You will face basic Arithmetic, Number Sequences, and Logic Puzzles.</p>
+                                </div>
+                                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                                    <div className="font-bold flex items-center mb-1 text-gray-900 dark:text-white"><Clock className="w-4 h-4 mr-2"/> Penalties</div>
+                                    <p className="text-gray-500">Correct answers give +100 points. Wrong answers deduct 5 seconds from the clock!</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+                
+                <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-700">
+                    <Button onClick={onClose} className="w-full">Got it, Let's Play!</Button>
+                </div>
+            </div>
+        </Modal>
+    );
+};
 
 // --- IN-GAME CHAT COMPONENT ---
 const InGameChat: React.FC<{ userName: string }> = ({ userName }) => {
@@ -622,6 +754,7 @@ const MathMasterGame: React.FC<{ onFinish: (score: number) => void, onExit: () =
 const GameCentreView: React.FC<GameCentreViewProps> = ({ user, onUpdateUser }) => {
   const [activeGame, setActiveGame] = useState<GameType>('none');
   const [lastReward, setLastReward] = useState<number | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   const handleGameEnd = async (score: number, gameName: string) => {
       // Calculate Reward
@@ -645,6 +778,15 @@ const GameCentreView: React.FC<GameCentreViewProps> = ({ user, onUpdateUser }) =
       {/* --- GAME MENU (LOBBY) --- */}
       {activeGame === 'none' && (
         <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
+            {/* Guide Button */}
+            <button 
+                onClick={() => setShowGuide(true)}
+                className="absolute top-6 right-6 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-full flex items-center space-x-2 transition-all backdrop-blur-sm"
+            >
+                <BookOpen className="w-4 h-4" />
+                <span className="text-sm font-bold">How to Play</span>
+            </button>
+
             <div className="text-center mb-10">
                 <Badge color="blue" className="mb-4 text-xs font-mono uppercase tracking-widest">Arcade • Puzzle • Logic</Badge>
                 <h1 className="text-5xl md:text-6xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400">
@@ -751,7 +893,8 @@ const GameCentreView: React.FC<GameCentreViewProps> = ({ user, onUpdateUser }) =
               )}
           </div>
       )}
-
+      
+      <GameGuideModal isOpen={showGuide} onClose={() => setShowGuide(false)} />
     </div>
   );
 };

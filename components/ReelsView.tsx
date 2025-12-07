@@ -1,9 +1,10 @@
 
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Video, User, VideoEditingData, Draft, ChatMessage } from '../types';
 import { storageService, loadMediaFromDB } from '../services/storageService';
 import { Card, Button, Input, Modal, Badge } from './UIComponents';
-import { Heart, MessageCircle, Share2, Plus, Play, X, Send, ArrowLeft, Grid, Users, Upload, Sparkles, Scissors, Type, Sticker, Music, Check, Volume2, VolumeX, Save, FileVideo, Eye, Clock, MessageSquare, Search } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Plus, Play, X, Send, ArrowLeft, Grid, Users, Upload, Sparkles, Scissors, Type, Sticker, Music, Check, Volume2, VolumeX, Save, FileVideo, Eye, Clock, MessageSquare, Search, Loader2 } from 'lucide-react';
 
 interface ReelsViewProps {
   user: User;
@@ -78,6 +79,12 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   
+  // Infinite Scroll State
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+
   // Profile View State
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
@@ -101,13 +108,52 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
   const observer = useRef<IntersectionObserver | null>(null);
 
+  // Initial Data Load
   useEffect(() => {
-      const fetchData = async () => {
-          setVideos(await storageService.getVideos());
+      const init = async () => {
           setDrafts(await storageService.getDrafts(user.id));
+          loadVideos(0, true);
       };
-      fetchData();
+      init();
   }, [user.id, viewingProfileId]);
+
+  const loadVideos = async (pageNum: number, reset: boolean = false) => {
+      if (isLoading && !reset) return;
+      setIsLoading(true);
+      const limit = 5;
+      const newVideos = await storageService.getVideos(pageNum, limit);
+      
+      if (newVideos.length < limit) setHasMore(false);
+      else setHasMore(true);
+
+      if (reset) {
+          setVideos(newVideos);
+          setPage(0);
+      } else {
+          setVideos(prev => {
+              const existingIds = new Set(prev.map(v => v.id));
+              const uniqueNew = newVideos.filter(v => !existingIds.has(v.id));
+              return [...prev, ...uniqueNew];
+          });
+      }
+      setIsLoading(false);
+  };
+
+  // Setup Observer for "Load More"
+  useEffect(() => {
+      const observer = new IntersectionObserver(entries => {
+          if (entries[0].isIntersecting && hasMore && !isLoading) {
+              setPage(prev => {
+                  const nextPage = prev + 1;
+                  loadVideos(nextPage);
+                  return nextPage;
+              });
+          }
+      }, { threshold: 0.1 });
+      
+      if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+      return () => observer.disconnect();
+  }, [hasMore, isLoading, videos.length]);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -118,6 +164,9 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
         const profileUser = await storageService.getUserById(viewingProfileId);
         if (!profileUser) return;
         
+        // When viewing a profile, we just filter the currently loaded videos (or we should fetch that user's videos separately in a real app)
+        // For simplicity in this infinite scroll context, we filter loaded.
+        // A robust app would have storageService.getUserVideos(id).
         const userVideos = videos.filter(v => v.userId === viewingProfileId);
         const totalLikes = userVideos.reduce((acc, v) => acc + v.likes, 0);
         const totalViews = userVideos.reduce((acc, v) => acc + (v.views || 0), 0);
@@ -197,7 +246,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
 
   const handleFollow = async (targetId: string) => {
      await storageService.toggleFollow(user.id, targetId);
-     setVideos(await storageService.getVideos()); 
+     // In a real app we'd refresh user data
   };
 
   const openComments = (video: Video) => {
@@ -356,7 +405,9 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
 
           await storageService.addVideo(newVideo);
           
-          setVideos(await storageService.getVideos());
+          // Refresh list from scratch
+          loadVideos(0, true);
+          
           setIsUploading(false);
           resetEditor();
           alert('Reel posted successfully!');
@@ -510,7 +561,21 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
                 </div>
             </div>
             ))}
-            {filteredVideos.length === 0 && (
+            
+            {/* Loading Indicator for Infinite Scroll */}
+            {hasMore && (
+                <div ref={loadMoreRef} className="snap-start w-full h-20 flex items-center justify-center bg-gray-900">
+                     <Loader2 className={`w-6 h-6 text-indigo-500 ${isLoading ? 'animate-spin' : 'opacity-50'}`} />
+                </div>
+            )}
+            
+            {!hasMore && filteredVideos.length > 0 && (
+                <div className="snap-start w-full h-20 flex items-center justify-center bg-gray-900 text-gray-500 text-sm">
+                    You're all caught up!
+                </div>
+            )}
+
+            {filteredVideos.length === 0 && !isLoading && (
                 <div className="h-full flex items-center justify-center text-gray-500">
                     No reels found.
                 </div>

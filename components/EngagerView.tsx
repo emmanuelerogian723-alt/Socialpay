@@ -385,6 +385,31 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
         </div>
       )}
 
+      {activeTab === 'wallet' && (
+          <WalletSection 
+            user={user} 
+            transactions={transactions} 
+            onUpdateUser={onUpdateUser}
+            onWithdrawRequest={async (amount, method, details) => {
+                await storageService.createTransaction({
+                  id: '',
+                  userId: user.id,
+                  userName: user.name,
+                  amount,
+                  type: 'withdrawal',
+                  status: 'pending',
+                  method,
+                  details,
+                  timestamp: Date.now()
+                });
+                const updated = { ...user, balance: user.balance - amount };
+                await storageService.updateUser(updated);
+                onUpdateUser(updated);
+                alert("Withdrawal request submitted for review.");
+            }}
+          />
+      )}
+
       {/* Verification Modal */}
       <Modal 
         isOpen={!!verifyingTask} 
@@ -498,6 +523,9 @@ const WalletSection: React.FC<{
     if (isNaN(amt) || amt <= 0) return alert("Please enter a valid amount.");
     if (amt > user.balance) return alert("Insufficient funds");
     if (amt < 5) return alert("Minimum withdrawal is $5.00");
+    if (method === 'Bank Transfer' && (!bankName || !accountNumber)) return alert("Please fill in bank details");
+    if (method !== 'Bank Transfer' && !accountNumber) return alert("Please enter wallet address");
+    
     setShowConfirm(true);
   };
 
@@ -574,13 +602,74 @@ const WalletSection: React.FC<{
                   required
               />
             </div>
-            {/* Additional inputs omitted for brevity but should be here */}
+            
+            <div>
+              <label className="block text-sm font-medium mb-1">Payment Method</label>
+              <Select value={method} onChange={e => setMethod(e.target.value)}>
+                <option value="Bank Transfer">Bank Transfer</option>
+                <option value="Crypto (USDT)">Crypto (USDT)</option>
+              </Select>
+            </div>
+
+            {method === 'Bank Transfer' ? (
+                <>
+                   <div>
+                     <label className="block text-sm font-medium mb-1">Bank Name</label>
+                     <Input required value={bankName} onChange={e => setBankName(e.target.value)} placeholder="e.g. Chase, Access Bank" />
+                   </div>
+                   <div>
+                     <label className="block text-sm font-medium mb-1">Account Number</label>
+                     <Input required value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="0000000000" />
+                   </div>
+                </>
+            ) : (
+                <div>
+                   <label className="block text-sm font-medium mb-1">Wallet Address (TRC20)</label>
+                   <Input required value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="T..." />
+                </div>
+            )}
+
             <Button type="submit" className="w-full" isLoading={loading} disabled={user.balance < 5}>
               Request Withdrawal
             </Button>
           </form>
         </Card>
       </div>
+      
+      {/* Transaction History */}
+      <Card>
+        <h3 className="text-lg font-bold mb-4 flex items-center">
+          <History className="w-5 h-5 mr-2 text-gray-500" /> Recent Transactions
+        </h3>
+        <div className="space-y-4 max-h-[400px] overflow-y-auto">
+          {transactions.length === 0 && <p className="text-gray-500 text-sm">No transactions yet.</p>}
+          {transactions.map(tx => (
+            <div key={tx.id} className="flex justify-between items-center border-b border-gray-100 dark:border-gray-700 pb-3 last:border-0">
+               <div>
+                 <div className="font-bold text-sm flex items-center">
+                    {tx.type === 'earning' && <Zap className="w-3 h-3 mr-1 text-yellow-500" />}
+                    {tx.type === 'withdrawal' && <ArrowUpDown className="w-3 h-3 mr-1 text-red-500" />}
+                    {tx.type === 'deposit' && <Plus className="w-3 h-3 mr-1 text-green-500" />}
+                    <span className="capitalize">{tx.type}</span>
+                 </div>
+                 <div className="text-xs text-gray-500">{new Date(tx.timestamp).toLocaleDateString()}</div>
+                 <div className="text-xs text-gray-400 truncate max-w-[150px]">{tx.details}</div>
+               </div>
+               <div className="text-right">
+                  <div className={`font-bold ${
+                      tx.type === 'earning' || tx.type === 'deposit' ? 'text-green-600' : 
+                      tx.type === 'withdrawal' || tx.type === 'fee' ? 'text-red-600' : 'text-gray-600'
+                  }`}>
+                    {tx.type === 'withdrawal' || tx.type === 'fee' ? '-' : '+'}${tx.amount.toFixed(2)}
+                  </div>
+                  <Badge color={tx.status === 'completed' ? 'green' : tx.status === 'pending' ? 'yellow' : 'red'}>
+                    {tx.status}
+                  </Badge>
+               </div>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <Modal isOpen={showDepositModal} onClose={() => setShowDepositModal(false)} title="Add Funds">
          <BankDetails />
@@ -606,6 +695,35 @@ const WalletSection: React.FC<{
                Submit Payment Notification
             </Button>
          </div>
+      </Modal>
+
+      <Modal isOpen={showConfirm} onClose={() => setShowConfirm(false)} title="Confirm Withdrawal">
+          <div className="space-y-4">
+              <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg flex items-start">
+                  <AlertTriangle className="w-5 h-5 mr-2 flex-shrink-0" />
+                  <p className="text-sm">Please verify your details carefully. Withdrawals cannot be reversed once processed.</p>
+              </div>
+              
+              <div className="border rounded-lg p-4 space-y-2 bg-gray-50 dark:bg-gray-800">
+                  <div className="flex justify-between">
+                      <span className="text-gray-500">Amount:</span>
+                      <span className="font-bold text-lg">${parseFloat(withdrawAmount).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                      <span className="text-gray-500">Method:</span>
+                      <span className="font-medium">{method}</span>
+                  </div>
+                  <div className="flex justify-between">
+                      <span className="text-gray-500">Details:</span>
+                      <span className="font-medium text-right break-all pl-4">{method === 'Bank Transfer' ? `${bankName} - ${accountNumber}` : accountNumber}</span>
+                  </div>
+              </div>
+
+              <div className="flex space-x-3 pt-4">
+                  <Button variant="ghost" onClick={() => setShowConfirm(false)} className="flex-1">Cancel</Button>
+                  <Button onClick={confirmWithdrawal} className="flex-1" isLoading={loading}>Confirm & Withdraw</Button>
+              </div>
+          </div>
       </Modal>
     </div>
   );

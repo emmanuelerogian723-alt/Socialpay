@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Shield, AlertTriangle, Users, DollarSign, Check, X, Bell, RefreshCw, Edit, Lock, Wallet, ArrowDownLeft, FileText, Trash2, Download, BarChart2, Layers, Briefcase } from 'lucide-react';
 import { Card, Button, Badge, Input, Select } from './UIComponents';
@@ -33,7 +34,8 @@ const AdminView: React.FC = () => {
     setUsers(await storageService.getUsers());
     setTransactions(await storageService.getTransactions());
     setCampaigns(await storageService.getCampaigns());
-    setVideos(await storageService.getVideos());
+    // Load top 100 videos for moderation context
+    setVideos(await storageService.getVideos(0, 100));
     setGigs(await storageService.getGigs());
     setTimeout(() => setIsRefreshing(false), 500);
   };
