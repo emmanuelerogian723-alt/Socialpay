@@ -1,4 +1,5 @@
 
+
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage } from '../types';
 
@@ -366,10 +367,19 @@ export const storageService = {
 
   async addVideo(video: Video) {
     if (USE_SUPABASE) {
-      await supabase.from('videos').insert([{
-        user_id: video.userId, user_name: video.userName, user_avatar: video.userAvatar,
-        url: video.url, caption: video.caption, tags: video.tags, editing_data: video.editingData, timestamp: Date.now()
-      }]);
+      const dbVideo = {
+          user_id: video.userId,
+          user_name: video.userName,
+          user_avatar: video.userAvatar,
+          url: video.url,
+          caption: video.caption,
+          tags: video.tags,
+          editing_data: video.editingData,
+          timestamp: video.timestamp,
+          likes: 0,
+          views: 0
+      };
+      await supabase.from('videos').insert([dbVideo]);
     } else {
         const list = getLocal<Video[]>('videos', []);
         list.unshift(video);
@@ -387,7 +397,11 @@ export const storageService = {
 
   async incrementVideoView(id: string) {
     if(USE_SUPABASE) {
-       // RPC call preferred, here simulation via get/update
+         // Simple read-modify-write for demo (production should use RPC)
+         const { data } = await supabase.from('videos').select('views').eq('id', id).single();
+         if(data) {
+             await supabase.from('videos').update({ views: (data.views || 0) + 1 }).eq('id', id);
+         }
     } else {
         const list = getLocal<Video[]>('videos', []);
         const v = list.find(v => v.id === id);
@@ -398,8 +412,17 @@ export const storageService = {
   // --- DRAFTS ---
   async getDrafts(userId: string): Promise<Draft[]> {
     if(USE_SUPABASE) {
-        // Mock implementation for draft if table doesn't exist yet, or real if it does
-        return []; 
+          const { data, error } = await supabase.from('drafts').select('*').eq('user_id', userId);
+          if (error) return [];
+          return data.map((d: any) => ({
+              id: d.id,
+              userId: d.user_id,
+              videoFile: d.video_file,
+              caption: d.caption,
+              tags: d.tags,
+              editingData: d.editing_data,
+              timestamp: d.timestamp
+          }));
     } else {
         const list = getLocal<Draft[]>('drafts', []);
         return list.filter(d => d.userId === userId);
@@ -408,7 +431,15 @@ export const storageService = {
 
   async saveDraft(draft: Draft) {
     if(USE_SUPABASE) {
-        // ...
+          const dbDraft = {
+              user_id: draft.userId,
+              video_file: draft.videoFile,
+              caption: draft.caption,
+              tags: draft.tags,
+              editing_data: draft.editingData,
+              timestamp: draft.timestamp
+          };
+          await supabase.from('drafts').insert([dbDraft]);
     } else {
         const list = getLocal<Draft[]>('drafts', []);
         list.push(draft);
@@ -477,7 +508,19 @@ export const storageService = {
 
   async likeCommunityPost(postId: string, userId: string) {
     if(USE_SUPABASE) {
-       // ...
+          const { data } = await supabase.from('community_posts').select('liked_by, likes').eq('id', postId).single();
+          if(data) {
+              let likedBy = data.liked_by || [];
+              let likes = data.likes || 0;
+              if (likedBy.includes(userId)) {
+                  likedBy = likedBy.filter((id: string) => id !== userId);
+                  likes = Math.max(0, likes - 1);
+              } else {
+                  likedBy.push(userId);
+                  likes = likes + 1;
+              }
+              await supabase.from('community_posts').update({ liked_by: likedBy, likes }).eq('id', postId);
+          }
     } else {
         const list = getLocal<CommunityPost[]>('community_posts', []);
         const p = list.find(x => x.id === postId);
@@ -515,7 +558,16 @@ export const storageService = {
   // --- SOCIAL & NOTIFICATIONS ---
   async toggleFollow(userId: string, targetId: string) {
       if(USE_SUPABASE) {
-          // ...
+          const { data } = await supabase.from('profiles').select('followers').eq('id', targetId).single();
+          if(data) {
+              let followers = data.followers || [];
+              if (followers.includes(userId)) {
+                  followers = followers.filter((id: string) => id !== userId);
+              } else {
+                  followers.push(userId);
+              }
+              await supabase.from('profiles').update({ followers }).eq('id', targetId);
+          }
       } else {
           const users = getLocal<User[]>('users', []);
           const target = users.find(u => u.id === targetId);
@@ -530,7 +582,19 @@ export const storageService = {
 
   async getMessages(u1: string, u2: string): Promise<ChatMessage[]> {
     if(USE_SUPABASE) {
-        return []; // Chat requires realtime or tables
+          const { data, error } = await supabase.from('messages')
+            .select('*')
+            .or(`and(sender_id.eq.${u1},receiver_id.eq.${u2}),and(sender_id.eq.${u2},receiver_id.eq.${u1})`)
+            .order('timestamp', { ascending: true });
+            
+          if(error) return [];
+          return data.map((m: any) => ({
+              id: m.id,
+              senderId: m.sender_id,
+              receiverId: m.receiver_id,
+              text: m.text,
+              timestamp: m.timestamp
+          }));
     } else {
         const msgs = getLocal<ChatMessage[]>('messages', []);
         return msgs.filter(m => (m.senderId === u1 && m.receiverId === u2) || (m.senderId === u2 && m.receiverId === u1))
@@ -540,7 +604,12 @@ export const storageService = {
 
   async sendMessage(msg: ChatMessage) {
       if(USE_SUPABASE) {
-          // ...
+          await supabase.from('messages').insert([{
+              sender_id: msg.senderId,
+              receiver_id: msg.receiverId,
+              text: msg.text,
+              timestamp: msg.timestamp
+          }]);
       } else {
           const list = getLocal<ChatMessage[]>('messages', []);
           list.push(msg);
