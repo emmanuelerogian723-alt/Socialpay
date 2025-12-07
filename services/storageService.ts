@@ -1,6 +1,7 @@
 
+
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage } from '../types';
+import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage, MusicTrack } from '../types';
 
 // Helper to determine mode
 const USE_SUPABASE = isSupabaseConfigured();
@@ -297,6 +298,71 @@ export const storageService = {
       }
   },
 
+  // --- MUSIC HUB ---
+  async getMusicTracks(): Promise<MusicTrack[]> {
+    if (USE_SUPABASE) {
+        const { data, error } = await supabase.from('music_tracks').select('*').order('created_at', { ascending: false });
+        if(error) return [];
+        return data.map((t: any) => ({
+            ...t, artistId: t.artist_id, artistName: t.artist_name, coverUrl: t.cover_url, audioUrl: t.audio_url, createdAt: t.created_at
+        }));
+    } else {
+        return getLocal<MusicTrack[]>('music_tracks', []);
+    }
+  },
+
+  async uploadMusicTrack(track: MusicTrack) {
+    if (USE_SUPABASE) {
+        await supabase.from('music_tracks').insert([{
+            artist_id: track.artistId,
+            artist_name: track.artistName,
+            title: track.title,
+            cover_url: track.coverUrl,
+            audio_url: track.audioUrl,
+            genre: track.genre,
+            plays: 0,
+            price: track.price,
+            created_at: track.createdAt
+        }]);
+    } else {
+        const list = getLocal<MusicTrack[]>('music_tracks', []);
+        list.unshift(track);
+        setLocal('music_tracks', list);
+    }
+  },
+
+  async recordMusicPlay(trackId: string, artistId: string, price: number) {
+      if(USE_SUPABASE) {
+          // Increment play count
+          const { data } = await supabase.from('music_tracks').select('plays').eq('id', trackId).single();
+          if(data) {
+              await supabase.from('music_tracks').update({ plays: (data.plays || 0) + 1 }).eq('id', trackId);
+          }
+
+          // Pay Artist
+          const artist = await this.getUserById(artistId);
+          if(artist) {
+              const newBalance = artist.balance + price;
+              await this.updateUser({ ...artist, balance: newBalance });
+              // Optional: Record micro-transaction
+          }
+      } else {
+          const list = getLocal<MusicTrack[]>('music_tracks', []);
+          const track = list.find(t => t.id === trackId);
+          if(track) {
+              track.plays++;
+              setLocal('music_tracks', list);
+              // Pay Artist Mock
+              const users = getLocal<User[]>('users', []);
+              const artist = users.find(u => u.id === artistId);
+              if(artist) {
+                  artist.balance += price;
+                  setLocal('users', users);
+              }
+          }
+      }
+  },
+
   // --- CAMPAIGNS ---
   async getCampaigns(): Promise<Campaign[]> {
     if (USE_SUPABASE) {
@@ -378,9 +444,9 @@ export const storageService = {
   },
 
   // --- MEDIA ---
-  async uploadMedia(file: File): Promise<string> {
+  async uploadMedia(file: Blob | File): Promise<string> {
     if (USE_SUPABASE) {
-      const fileExt = file.name.split('.').pop();
+      const fileExt = file instanceof File ? file.name.split('.').pop() : 'webm';
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
       const { error } = await supabase.storage.from('socialpay-media').upload(fileName, file);
       if (error) throw error;
@@ -399,7 +465,7 @@ export const storageService = {
     }
   },
 
-  // --- VIDEOS ---
+  // --- VIDEOS / REELS ---
   async getVideos(page: number = 0, limit: number = 5): Promise<Video[]> {
     if (USE_SUPABASE) {
       const from = page * limit;
@@ -429,6 +495,7 @@ export const storageService = {
           user_name: video.userName,
           user_avatar: video.userAvatar,
           url: video.url,
+          type: video.type || 'video',
           caption: video.caption,
           tags: video.tags,
           editing_data: video.editingData,
@@ -475,6 +542,7 @@ export const storageService = {
               id: d.id,
               userId: d.user_id,
               videoFile: d.video_file,
+              type: d.type || 'video',
               caption: d.caption,
               tags: d.tags,
               editingData: d.editing_data,

@@ -1,4 +1,5 @@
 
+
 export type Role = 'creator' | 'engager' | 'admin';
 
 export type Platform = 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'linkedin';
@@ -77,9 +78,10 @@ export interface Notification {
 
 export interface VideoEditingData {
     filter: string;
-    stickers: { id: string, emoji: string, x: number, y: number }[];
+    stickers: { id: string, emoji?: string, imageUrl?: string, x: number, y: number }[];
     textOverlays: { id: string, text: string, x: number, y: number, color: string }[];
     trim?: { start: number, end: number };
+    voiceoverUrl?: string;
 }
 
 export interface Video {
@@ -88,6 +90,7 @@ export interface Video {
   userName: string;
   userAvatar: string;
   url: string;
+  type: 'video' | 'image';
   caption: string;
   likes: number;
   views?: number;
@@ -102,6 +105,7 @@ export interface Draft {
     id: string;
     userId: string;
     videoFile: string;
+    type: 'video' | 'image';
     caption: string;
     tags: string;
     editingData: VideoEditingData;
@@ -153,4 +157,17 @@ export interface CommunityPost {
   commentsList?: CommunityComment[];
   timestamp: number;
   likedBy: string[]; // User IDs
+}
+
+export interface MusicTrack {
+  id: string;
+  artistId: string;
+  artistName: string;
+  title: string;
+  coverUrl: string;
+  audioUrl: string;
+  genre: string;
+  plays: number;
+  price: number; // Pay per play to artist
+  createdAt: number;
 }
