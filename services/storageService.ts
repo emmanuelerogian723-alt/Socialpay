@@ -49,6 +49,55 @@ const saveMediaToIDB = async (blobStr: string): Promise<string> => {
     });
 };
 
+// --- IMAGE COMPRESSION HELPER ---
+const compressImage = async (file: File | Blob): Promise<Blob> => {
+    // Only compress images
+    if (file.type && !file.type.startsWith('image/')) return file;
+    
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Max dimension HD (1920x1080)
+            const MAX_WIDTH = 1920;
+            const MAX_HEIGHT = 1080;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+                if (width > MAX_WIDTH) {
+                    height *= MAX_WIDTH / width;
+                    width = MAX_WIDTH;
+                }
+            } else {
+                if (height > MAX_HEIGHT) {
+                    width *= MAX_HEIGHT / height;
+                    height = MAX_HEIGHT;
+                }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            ctx?.drawImage(img, 0, 0, width, height);
+            
+            // Compress to JPEG 80%
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    // Only use compressed if it's actually smaller
+                    if (blob.size < file.size) resolve(blob);
+                    else resolve(file);
+                } else {
+                    resolve(file);
+                }
+            }, 'image/jpeg', 0.8);
+        };
+        img.onerror = () => resolve(file);
+    });
+};
+
 export const storageService = {
   
   // --- AUTH ---
@@ -446,12 +495,31 @@ export const storageService = {
   // --- MEDIA ---
   async uploadMedia(file: Blob | File): Promise<string> {
     if (USE_SUPABASE) {
-      const fileExt = file instanceof File ? file.name.split('.').pop() : 'webm';
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const { error } = await supabase.storage.from('socialpay-media').upload(fileName, file);
-      if (error) throw error;
-      const { data } = supabase.storage.from('socialpay-media').getPublicUrl(fileName);
-      return data.publicUrl;
+        let fileToUpload = file;
+        
+        // Optimize: Compress images before upload
+        if (file instanceof File || file instanceof Blob) {
+           const type = file instanceof File ? file.type : file.type;
+           if (type.startsWith('image/')) {
+               try {
+                   fileToUpload = await compressImage(file);
+               } catch (e) {
+                   console.warn("Image compression failed, uploading original.", e);
+               }
+           }
+        }
+
+        const fileExt = file instanceof File ? file.name.split('.').pop() : (file.type.includes('image') ? 'jpg' : 'webm');
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const { error } = await supabase.storage.from('socialpay-media').upload(fileName, fileToUpload, {
+            cacheControl: '3600',
+            upsert: false
+        });
+        
+        if (error) throw error;
+        
+        const { data } = supabase.storage.from('socialpay-media').getPublicUrl(fileName);
+        return data.publicUrl;
     } else {
         // Mock IDB Storage
         return new Promise((resolve) => {

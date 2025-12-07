@@ -1,6 +1,5 @@
 
 
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Video, User, VideoEditingData, Draft, ChatMessage } from '../types';
 import { storageService, loadMediaFromDB } from '../services/storageService';
@@ -296,6 +295,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   // --- EDITOR STATE ---
   const [editorStep, setEditorStep] = useState<'upload' | 'trim' | 'edit' | 'details'>('upload');
   const [newVideoFile, setNewVideoFile] = useState<string | null>(null);
+  const [selectedFileObj, setSelectedFileObj] = useState<File | null>(null); // Store actual File
   const [mediaType, setMediaType] = useState<'video' | 'image'>('video');
   const [editingData, setEditingData] = useState<VideoEditingData>({
     filter: '',
@@ -324,6 +324,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setSelectedFileObj(file); // Capture original file for upload
       const isVideo = file.type.startsWith('video');
       setMediaType(isVideo ? 'video' : 'image');
       if (file.size > 50 * 1024 * 1024) return alert("Max 50MB");
@@ -372,6 +373,7 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
   const resetEditor = () => {
       setEditorStep('upload');
       setNewVideoFile(null);
+      setSelectedFileObj(null);
       setEditingData({ filter: '', stickers: [], textOverlays: [], trim: { start: 0, end: 10 } });
       setCaption('');
       setTags('');
@@ -383,27 +385,43 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
       if (!newVideoFile) return;
       if (uploadProgress > 0) return;
       
-      let progress = 0;
-      const interval = setInterval(() => {
-         const increment = Math.max(1, Math.floor(Math.random() * 5)); 
-         progress = Math.min(progress + increment, 100);
-         setUploadProgress(progress);
-         if (progress >= 100) {
-             clearInterval(interval);
-             finalizePost();
-         }
-      }, 50);
+      finalizePost();
   };
 
   const finalizePost = async () => {
       try {
+          // 1. Start progress animation (optimistic)
+          let progress = 0;
+          const interval = setInterval(() => {
+              progress = Math.min(progress + 5, 90); // Cap at 90 until done
+              setUploadProgress(progress);
+          }, 100);
+
+          // 2. Upload the actual file to Storage (CRITICAL for performance)
+          let finalUrl = newVideoFile!;
+          
+          if (selectedFileObj) {
+              // Case A: Fresh Upload
+              finalUrl = await storageService.uploadMedia(selectedFileObj);
+          } else if (newVideoFile && newVideoFile.startsWith('data:')) {
+              // Case B: Draft / Data URI -> Convert to Blob and Upload
+              try {
+                  const res = await fetch(newVideoFile);
+                  const blob = await res.blob();
+                  finalUrl = await storageService.uploadMedia(blob);
+              } catch (e) {
+                  console.warn("Failed to convert draft blob, using base64 (slower)");
+              }
+          }
+
+          // 3. Create Record
           const tagList = tags.split(/[\s,]+/).filter(t => t).map(t => t.startsWith('#') ? t : `#${t}`);
           const newVideo: Video = {
             id: Date.now().toString(),
             userId: user.id,
             userName: user.name,
             userAvatar: user.avatar,
-            url: newVideoFile!,
+            url: finalUrl,
             type: mediaType,
             caption: caption,
             likes: 0,
@@ -414,12 +432,20 @@ const ReelsView: React.FC<ReelsViewProps> = ({ user }) => {
             editingData: editingData,
             timestamp: Date.now()
           };
+          
           await storageService.addVideo(newVideo);
-          loadVideos(0, true);
-          setIsUploading(false);
-          resetEditor();
+          
+          // 4. Finish
+          clearInterval(interval);
+          setUploadProgress(100);
+          setTimeout(() => {
+              loadVideos(0, true);
+              setIsUploading(false);
+              resetEditor();
+          }, 500);
+
       } catch (e) {
-          alert('Failed to post. Try again.');
+          alert('Failed to post. Check connection.');
           setIsUploading(false);
           setUploadProgress(0);
       }
