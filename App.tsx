@@ -1,19 +1,21 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Notification } from './types';
-import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe } from 'lucide-react';
+import { User, Notification } from '../types';
+import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe, Gamepad2 } from 'lucide-react';
 import CreatorView from './components/CreatorView';
 import EngagerView from './components/EngagerView';
 import AdminView from './components/AdminView';
 import ReelsView from './components/ReelsView';
 import GigsView from './components/GigsView';
 import CommunityView from './components/CommunityView';
+import GameCentreView from './components/GameCentreView';
 import SettingsView from './components/SettingsView';
 import { AuthView } from './components/AuthView';
 import { ToastContainer } from './components/UIComponents';
 import { storageService } from './services/storageService';
+import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 
-type ViewState = 'dashboard' | 'reels' | 'gigs' | 'community' | 'settings';
+type ViewState = 'dashboard' | 'reels' | 'gigs' | 'community' | 'games' | 'settings';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -23,14 +25,29 @@ const App: React.FC = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
 
-  // Load User Session
+  // Load User Session & Handle Email Redirects
   useEffect(() => {
-    const checkUser = async () => {
-        // In a real Supabase app, we listen to auth state changes.
-        // For this hybrid, if user is already in memory or local storage, we reload.
-        // Assuming user is managed by AuthView and passed up.
+    const initSession = async () => {
+        // 1. Check active session
+        const sessionUser = await storageService.getSession();
+        if (sessionUser) {
+            setUser(sessionUser);
+        }
+
+        // 2. Listen for Auth Changes (e.g., clicking confirmation link in email)
+        if (isSupabaseConfigured()) {
+            const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+                if (event === 'SIGNED_IN' && session?.user) {
+                    const profile = await storageService.getUserById(session.user.id);
+                    if (profile) setUser(profile);
+                } else if (event === 'SIGNED_OUT') {
+                    setUser(null);
+                }
+            });
+            return () => subscription.unsubscribe();
+        }
     };
-    checkUser();
+    initSession();
   }, []);
 
   // Poll for notifications
@@ -120,6 +137,7 @@ const App: React.FC = () => {
           <NavItem icon={PlayCircle} label="Reels" viewId="reels" />
           <NavItem icon={ShoppingBag} label="Gig Market" viewId="gigs" />
           <NavItem icon={Globe} label="Community" viewId="community" />
+          <NavItem icon={Gamepad2} label="Game Centre" viewId="games" />
           <div className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-6">Account</div>
           <NavItem icon={Settings} label="Settings" viewId="settings" />
         </div>
@@ -150,7 +168,7 @@ const App: React.FC = () => {
           
           <div className="flex-1 max-w-xl mx-4">
              <h2 className="text-lg font-semibold capitalize text-gray-700 dark:text-gray-200">
-               {currentView === 'gigs' ? 'Marketplace' : currentView === 'community' ? 'Community Feed' : currentView}
+               {currentView === 'gigs' ? 'Marketplace' : currentView === 'community' ? 'Community Feed' : currentView === 'games' ? 'Arcade' : currentView}
              </h2>
           </div>
 
@@ -188,6 +206,7 @@ const App: React.FC = () => {
           {currentView === 'reels' && <ReelsView user={user} />}
           {currentView === 'gigs' && <GigsView user={user} onUpdateUser={setUser} />}
           {currentView === 'community' && <CommunityView user={user} />}
+          {currentView === 'games' && <GameCentreView user={user} onUpdateUser={setUser} />}
           {currentView === 'settings' && <SettingsView user={user} onUpdateUser={setUser} />}
         </div>
         

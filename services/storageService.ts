@@ -157,20 +157,12 @@ export const storageService = {
                     following: []
                 };
 
-                // Insert into profiles table
-                // We use 'upsert' or 'insert' but assume if it fails, it might be due to race condition (already exists)
-                // or RLS. In EITHER case, we should NOT block the user. We should return the user object we constructed.
                 const { error: insertError } = await supabase.from('profiles').insert([newProfile]);
                 
                 if (insertError) {
-                    // We log this as a warning, not an error that stops execution.
-                    // If error is 23505 (unique_violation), it means profile exists now (race condition).
-                    // If error is RLS, it means we can't write, but we can still let user use the app in read-only mode for profile.
                     console.warn("Auto-creation log (safe to ignore):", JSON.stringify(insertError));
                 }
 
-                // Return the newly created profile structure regardless of insert success
-                // This ensures the user is NEVER locked out.
                 return {
                     ...newProfile,
                     verificationStatus: newProfile.verification_status,
@@ -246,6 +238,46 @@ export const storageService = {
                  type: 'adjustment', status: 'completed', method: 'Admin', details: reason, timestamp: Date.now()
              });
          }
+      }
+  },
+
+  // --- GAMES ---
+  async recordGameReward(userId: string, amount: number, gameName: string) {
+      if (USE_SUPABASE) {
+          const user = await this.getUserById(userId);
+          if (user) {
+              const newBalance = user.balance + amount;
+              const newXp = user.xp + 50;
+              await this.updateUser({ ...user, balance: newBalance, xp: newXp });
+              await this.createTransaction({
+                  id: '', 
+                  userId: user.id, 
+                  userName: user.name, 
+                  amount: amount,
+                  type: 'earning', 
+                  status: 'completed', 
+                  method: 'System', 
+                  details: `Game Win: ${gameName}`, 
+                  timestamp: Date.now()
+              });
+          }
+      } else {
+          const user = await this.getUserById(userId);
+          if (user) {
+              const updated = { ...user, balance: user.balance + amount, xp: user.xp + 50 };
+              await this.updateUser(updated);
+              await this.createTransaction({
+                  id: Date.now().toString(), 
+                  userId, 
+                  userName: user.name, 
+                  amount: amount,
+                  type: 'earning', 
+                  status: 'completed', 
+                  method: 'System', 
+                  details: `Game Win: ${gameName}`, 
+                  timestamp: Date.now()
+              });
+          }
       }
   },
 
@@ -619,30 +651,58 @@ export const storageService = {
 
   async getNotifications(userId: string): Promise<Notification[]> {
     if(USE_SUPABASE) {
-        const { data } = await supabase.from('notifications').select('*').or(`user_id.eq.${userId},user_id.eq.all`).order('timestamp', { ascending: false });
-        return (data || []).map((n: any) => ({...n, userId: n.user_id}));
+        const { data, error } = await supabase.from('notifications')
+          .select('*')
+          .or(`user_id.eq.${userId},user_id.eq.all`)
+          .order('timestamp', { ascending: false });
+        
+        if(error) {
+            console.error("Error fetching notifications", error);
+            return [];
+        }
+        return (data || []).map((n: any) => ({
+            id: n.id,
+            userId: n.user_id,
+            title: n.title,
+            message: n.message,
+            type: n.type,
+            read: n.read,
+            timestamp: n.timestamp
+        }));
     } else {
         const list = getLocal<Notification[]>('notifications', []);
-        return list.filter(n => n.userId === userId || n.userId === 'all');
+        return list.filter(n => n.userId === userId || n.userId === 'all')
+                   .sort((a,b) => b.timestamp - a.timestamp);
     }
   },
 
-  async createNotification(n: Notification) {
+  async createNotification(notification: Notification) {
       if(USE_SUPABASE) {
           await supabase.from('notifications').insert([{
-              user_id: n.userId, title: n.title, message: n.message, type: n.type, read: n.read, timestamp: n.timestamp
+              user_id: notification.userId,
+              title: notification.title,
+              message: notification.message,
+              type: notification.type,
+              read: notification.read,
+              timestamp: notification.timestamp
           }]);
       } else {
           const list = getLocal<Notification[]>('notifications', []);
-          list.unshift(n);
+          list.push(notification);
           setLocal('notifications', list);
       }
   },
 
-  async broadcastMessage(msg: string) {
-      this.createNotification({
-          id: Date.now().toString(), userId: 'all', title: 'Admin Broadcast',
-          message: msg, type: 'info', read: false, timestamp: Date.now()
-      });
+  async broadcastMessage(message: string) {
+      const notification: Notification = {
+          id: Date.now().toString(),
+          userId: 'all',
+          title: 'Admin Broadcast',
+          message: message,
+          type: 'info',
+          read: false,
+          timestamp: Date.now()
+      };
+      await this.createNotification(notification);
   }
 };
