@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Role } from '../types';
 import { Button, Input, Card, Select } from './UIComponents';
 import { storageService } from '../services/storageService';
-import { Shield, Fingerprint, Mail, ArrowRight } from 'lucide-react';
+import { Shield, Fingerprint, Mail, ArrowRight, MapPin } from 'lucide-react';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 
 interface AuthViewProps {
@@ -19,22 +19,37 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [location, setLocation] = useState<{lat: number, lng: number} | null>(null);
 
-  // Check for biometric capability (simulation)
+  // Check for biometric capability
   useEffect(() => {
     if (window.PublicKeyCredential) {
       setBiometricAvailable(true);
     }
   }, []);
 
+  const requestLocation = () => {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                setLocation({
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude
+                });
+            },
+            (err) => {
+                console.warn("Location access denied or failed", err);
+            }
+        );
+    }
+  };
+
   const handleBiometricLogin = async () => {
     setLoading(true);
     // Simulate biometric delay
     setTimeout(() => {
         setLoading(false);
-        // For simulation, we'll just alert. In a real app, this uses WebAuthn
         alert("Biometric scan successful! (Simulation)");
-        // Ideally, you'd fetch the last logged-in user credential here
     }, 1500);
   };
 
@@ -47,6 +62,10 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
       if (viewState === 'login') {
         const user = await storageService.signIn(email, password);
         if (user) {
+          // Update location on login if available
+          if (location) {
+             storageService.updateUserLocation(user.id, location);
+          }
           onLogin(user);
         } else {
           setError("User data fetch failed. If you just signed up, please wait a moment or try logging in again.");
@@ -67,25 +86,24 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                 
                 const user = await storageService.getUserById(signUpResult.user!.id);
                 if (user) {
+                    if (location) storageService.updateUserLocation(user.id, location);
                     onLogin(user);
                     return;
                 }
             }
 
-            // Case B: No session returned OR Mock Mode -> Try explicit sign in
-            // This works if you have the auto-confirm trigger running on Supabase
+            // Case B: Mock Mode or Explicit sign in required
             const user = await storageService.signIn(email, password);
             if (user) {
+                if (location) storageService.updateUserLocation(user.id, location);
                 onLogin(user);
                 return;
             }
         } catch (loginError: any) {
-             // Case C: Login failed because backend STRICTLY requires email verification
              if (loginError.message?.includes('Email not confirmed')) {
                  setViewState('confirm');
                  return;
              }
-             // Other errors (e.g. network)
              throw loginError;
         }
       }
@@ -96,7 +114,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     }
   };
 
-  // --- CONFIRMATION SCREEN (Only shown if auto-login fails due to restriction) ---
+  // --- CONFIRMATION SCREEN ---
   if (viewState === 'confirm') {
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
@@ -109,9 +127,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                     We've sent a confirmation link to <strong>{email}</strong>. 
                     Please click the link in that email to verify your account.
                 </p>
-                <div className="bg-yellow-50 text-yellow-800 text-sm p-3 rounded-lg mb-6 text-left">
-                    <strong>Tip:</strong> If you want to skip this step in the future, please ask the Admin to enable "Auto Confirm" in the database settings.
-                </div>
                 <Button onClick={() => setViewState('login')} className="w-full">
                     Return to Sign In <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
@@ -121,10 +136,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
-      <Card className="w-full max-w-md">
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 bg-indigo-600 rounded-xl mb-4">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4 animate-fade-in">
+      <Card className="w-full max-w-md relative overflow-hidden">
+        {/* Decorative header */}
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 to-purple-600"></div>
+
+        <div className="text-center mb-6 pt-4">
+          <div className="inline-flex items-center justify-center w-12 h-12 bg-indigo-600 rounded-xl mb-4 shadow-lg shadow-indigo-500/30">
             <span className="text-white font-bold text-2xl">S</span>
           </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Social Pay</h1>
@@ -177,6 +195,17 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                </Select>
              </div>
           )}
+            
+          {/* Location Request */}
+          <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg flex items-center justify-between">
+              <div className="flex items-center text-sm text-blue-700 dark:text-blue-300">
+                  <MapPin className="w-4 h-4 mr-2" />
+                  <span>{location ? "Location Detected" : "Enable Location for better tasks"}</span>
+              </div>
+              {!location && (
+                  <button type="button" onClick={requestLocation} className="text-xs font-bold text-blue-600 underline">Allow</button>
+              )}
+          </div>
 
           {error && (
             <div className="p-3 bg-red-100 text-red-700 text-sm rounded-lg flex items-center animate-slide-up">
@@ -201,7 +230,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
           )}
         </form>
 
-        <div className="mt-6 text-center text-sm">
+        <div className="mt-6 text-center text-sm border-t border-gray-100 dark:border-gray-700 pt-4">
           <button 
             onClick={() => { 
                 setViewState(viewState === 'login' ? 'signup' : 'login'); 

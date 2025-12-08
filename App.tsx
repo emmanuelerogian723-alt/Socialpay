@@ -1,6 +1,5 @@
 
 
-
 import React, { useState, useEffect } from 'react';
 import { User, Notification } from '../types';
 import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe, Gamepad2, Music } from 'lucide-react';
@@ -13,6 +12,7 @@ import CommunityView from './components/CommunityView';
 import GameCentreView from './components/GameCentreView';
 import MusicHubView from './components/MusicHubView';
 import SettingsView from './components/SettingsView';
+import LandingView from './components/LandingView';
 import { AuthView } from './components/AuthView';
 import { ToastContainer } from './components/UIComponents';
 import { storageService } from './services/storageService';
@@ -22,6 +22,8 @@ type ViewState = 'dashboard' | 'reels' | 'gigs' | 'community' | 'games' | 'music
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [showWelcome, setShowWelcome] = useState(true); // Show Landing page by default
+  
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -35,6 +37,11 @@ const App: React.FC = () => {
         const sessionUser = await storageService.getSession();
         if (sessionUser) {
             setUser(sessionUser);
+            setShowWelcome(false); // Skip welcome if already logged in
+        } else {
+            // Check if first visit in session storage
+            const hasSeenWelcome = sessionStorage.getItem('hasSeenWelcome');
+            if (hasSeenWelcome) setShowWelcome(false);
         }
 
         // 2. Listen for Auth Changes (e.g., clicking confirmation link in email)
@@ -42,7 +49,10 @@ const App: React.FC = () => {
             const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
                 if (event === 'SIGNED_IN' && session?.user) {
                     const profile = await storageService.getUserById(session.user.id);
-                    if (profile) setUser(profile);
+                    if (profile) {
+                        setUser(profile);
+                        setShowWelcome(false);
+                    }
                 } else if (event === 'SIGNED_OUT') {
                     setUser(null);
                 }
@@ -75,6 +85,11 @@ const App: React.FC = () => {
     }
   }, [darkMode]);
 
+  const handleGetStarted = () => {
+      setShowWelcome(false);
+      sessionStorage.setItem('hasSeenWelcome', 'true');
+  };
+
   const handleLogin = (u: User) => {
     setUser(u);
     setCurrentView('dashboard');
@@ -84,6 +99,7 @@ const App: React.FC = () => {
     await storageService.signOut();
     setUser(null);
     setCurrentView('dashboard');
+    setShowWelcome(true);
   };
 
   const NavItem = ({ icon: Icon, label, viewId, onClick }: any) => (
@@ -103,6 +119,11 @@ const App: React.FC = () => {
       <span>{label}</span>
     </button>
   );
+
+  // --- WELCOME SCREEN ---
+  if (showWelcome && !user) {
+      return <LandingView onGetStarted={handleGetStarted} />;
+  }
 
   // --- AUTH SCREEN ---
   if (!user) {

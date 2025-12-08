@@ -3,6 +3,7 @@
   "description": "A two-sided engagement marketplace where creators buy engagement and users earn rewards for completing tasks, featuring AI-powered fraud detection.",
   "requestFramePermissions": [
     "microphone",
-    "camera"
+    "camera",
+    "geolocation"
   ]
 }
