@@ -4,7 +4,7 @@ import { Gig, User, Transaction, Conversation, ChatMessage } from '../types';
 import { storageService } from '../services/storageService';
 import { analyzeChatRisk } from '../services/geminiService';
 import { Card, Button, Input, Badge, Select, Modal } from './UIComponents';
-import { Plus, ShoppingBag, Search, Star, Lock, Clock, Smartphone, Mail, Globe, ShieldCheck, Eye, AlertTriangle, CheckCircle, Package, ArrowRight, MessageCircle, Send, X, ShieldAlert, Upload } from 'lucide-react';
+import { Plus, ShoppingBag, Search, Star, Lock, Clock, Smartphone, Mail, Globe, ShieldCheck, Eye, AlertTriangle, CheckCircle, Package, ArrowRight, MessageCircle, Send, X, ShieldAlert, Upload, Edit3, Check } from 'lucide-react';
 
 interface GigsViewProps {
   user: User;
@@ -29,6 +29,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     price: 10
   });
   const [isUploading, setIsUploading] = useState(false);
+  const [showPreview, setShowPreview] = useState(false); // New state for preview mode
 
   // Orders State
   const [myPurchases, setMyPurchases] = useState<Transaction[]>([]);
@@ -152,13 +153,18 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
       setIsSending(false);
   };
 
-  // ... (Create Gig & Purchase Logic same as before)
-  const handleCreateGig = async (e: React.FormEvent) => {
+  // Step 1: Validate and show Preview
+  const handlePreviewListing = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGig.title || !newGig.description || !newGig.price || !newGig.secretDelivery) {
         alert("Please fill in all required fields, including the Secret Delivery Details.");
         return;
     }
+    setShowPreview(true);
+  };
+
+  // Step 2: Actually Create Gig
+  const handleConfirmListing = async () => {
     let imageQuery = newGig.category;
     if (newGig.category === 'numbers') imageQuery = 'smartphone';
     if (newGig.category === 'social_accounts') imageQuery = 'social media';
@@ -182,6 +188,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     await storageService.createGig(gig);
     setActiveTab('market');
     setNewGig({ category: 'numbers', price: 10, secretDelivery: '' });
+    setShowPreview(false);
     alert('Asset listed successfully! It will appear in the market.');
   };
 
@@ -269,6 +276,71 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
 
   // --- CREATE FORM ---
   if (activeTab === 'create') {
+    if (showPreview) {
+        // --- PREVIEW MODE ---
+        return (
+            <div className="max-w-3xl mx-auto animate-slide-up pb-20">
+                <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold flex items-center">
+                        <Eye className="w-6 h-6 mr-2 text-indigo-600"/> Preview Listing
+                    </h2>
+                    <Button variant="ghost" onClick={() => setShowPreview(false)}>
+                        <Edit3 className="w-4 h-4 mr-2"/> Back to Edit
+                    </Button>
+                </div>
+                
+                <Card className="mb-6 overflow-hidden border-2 border-indigo-100 dark:border-indigo-900/30">
+                    <div className="bg-indigo-50 dark:bg-indigo-900/10 p-4 border-b border-indigo-100 dark:border-indigo-800 flex justify-between items-center">
+                        <span className="text-xs font-bold uppercase tracking-wider text-indigo-500">Public Preview</span>
+                        <Badge color="blue">{categories.find(c => c.id === newGig.category)?.label}</Badge>
+                    </div>
+                    
+                    <div className="p-6">
+                        {newGig.image && (
+                            <div className="mb-6 rounded-xl overflow-hidden border border-gray-100 dark:border-gray-700 shadow-sm max-h-[300px] flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+                                <img src={newGig.image} alt="Asset Preview" className="max-w-full h-auto object-contain" />
+                            </div>
+                        )}
+                        
+                        <div className="flex justify-between items-start mb-4">
+                            <h2 className="text-2xl font-bold">{newGig.title}</h2>
+                            <div className="text-3xl font-black text-green-600">${Number(newGig.price).toFixed(2)}</div>
+                        </div>
+                        
+                        <p className="text-gray-600 dark:text-gray-300 whitespace-pre-line mb-6">
+                            {newGig.description}
+                        </p>
+                    </div>
+                </Card>
+
+                <Card className="mb-6 border-2 border-yellow-100 dark:border-yellow-900/30">
+                    <div className="bg-yellow-50 dark:bg-yellow-900/10 p-4 border-b border-yellow-100 dark:border-yellow-800 flex items-center text-yellow-700 dark:text-yellow-400">
+                        <Lock className="w-4 h-4 mr-2"/>
+                        <span className="text-xs font-bold uppercase tracking-wider">Hidden Content (Delivery)</span>
+                    </div>
+                    <div className="p-6 bg-gray-50 dark:bg-gray-900/50">
+                        <p className="text-sm text-gray-500 mb-2">
+                            This information will only be revealed to the buyer <strong>after</strong> they pay. Ensure it is correct.
+                        </p>
+                        <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm whitespace-pre-wrap break-all shadow-inner">
+                            {newGig.secretDelivery}
+                        </div>
+                    </div>
+                </Card>
+
+                <div className="flex gap-4">
+                    <Button variant="outline" className="flex-1 py-3" onClick={() => setShowPreview(false)}>
+                        Make Changes
+                    </Button>
+                    <Button className="flex-1 py-3 text-lg" onClick={handleConfirmListing}>
+                        <Check className="w-5 h-5 mr-2" /> Confirm & Publish
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+
+    // --- EDIT MODE ---
     return (
       <div className="max-w-3xl mx-auto animate-slide-up pb-20">
          <div className="flex items-center justify-between mb-6">
@@ -276,7 +348,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
             <Button variant="ghost" onClick={() => setActiveTab('market')}>Cancel</Button>
         </div>
         <Card>
-           <form onSubmit={handleCreateGig} className="space-y-5">
+           <form onSubmit={handlePreviewListing} className="space-y-5">
              <div>
                <label className="block text-sm font-medium mb-1">Title</label>
                <Input placeholder="e.g. Verified USA +1 Phone Number" value={newGig.title || ''} onChange={e => setNewGig({...newGig, title: e.target.value})} required />
@@ -295,7 +367,8 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1">Price ($)</label>
-                   <Input type="number" min="5" value={newGig.price} onChange={e => setNewGig({...newGig, price: Number(e.target.value)})} required />
+                   {/* Changed min to 0 or any positive number */}
+                   <Input type="number" min="0" step="0.01" value={newGig.price} onChange={e => setNewGig({...newGig, price: Number(e.target.value)})} required />
                  </div>
              </div>
 
@@ -328,20 +401,20 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
              {/* Replaced URL input with File Upload */}
              <div>
                <label className="block text-sm font-medium mb-1">Asset Image (Screenshot/Photo)</label>
-               <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-6 text-center bg-gray-50 dark:bg-gray-900/50">
+               <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-6 text-center bg-gray-50 dark:bg-gray-900/50 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800/50">
                   {newGig.image ? (
-                      <div className="relative inline-block">
-                          <img src={newGig.image} alt="Preview" className="max-h-48 rounded-lg shadow-sm" />
+                      <div className="relative inline-block w-full">
+                          <img src={newGig.image} alt="Preview" className="max-h-64 rounded-lg shadow-sm mx-auto" />
                           <button 
                             type="button"
                             onClick={() => setNewGig(prev => ({...prev, image: ''}))}
-                            className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 shadow-md transition-colors"
+                            className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600 shadow-md transition-colors"
                           >
                               <X className="w-4 h-4" />
                           </button>
                       </div>
                   ) : (
-                      <label className="cursor-pointer flex flex-col items-center justify-center space-y-2 group">
+                      <label className="cursor-pointer flex flex-col items-center justify-center space-y-2 group w-full h-full">
                           <div className="p-3 bg-white dark:bg-gray-800 rounded-full text-indigo-500 shadow-sm group-hover:scale-110 transition-transform">
                               <Upload className="w-6 h-6" />
                           </div>
@@ -364,7 +437,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
 
              <div className="flex justify-end space-x-3 pt-4 border-t dark:border-gray-700">
                <Button type="button" variant="ghost" onClick={() => setActiveTab('market')}>Cancel</Button>
-               <Button type="submit" size="lg" disabled={isUploading}>List Asset</Button>
+               <Button type="submit" size="lg" disabled={isUploading}>Preview Listing</Button>
              </div>
            </form>
         </Card>

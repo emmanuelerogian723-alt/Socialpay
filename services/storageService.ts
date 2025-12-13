@@ -30,20 +30,29 @@ const openIDB = (): Promise<IDBDatabase> => {
 
 const saveMediaToIDB = async (blob: Blob): Promise<string> => {
     try {
+        // Read file first to prevent transaction auto-commit during async read
+        const reader = new FileReader();
+        const data = await new Promise<string | ArrayBuffer | null>((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+        });
+
+        if (!data) throw new Error("Failed to read blob data");
+
         const db = await openIDB();
         const tx = db.transaction(STORE_MEDIA, 'readwrite');
         const id = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        // Convert blob to base64 for simpler IDB storage in some browsers, or store blob directly
-        const reader = new FileReader();
         return new Promise((resolve, reject) => {
-            reader.onloadend = () => {
-                const data = reader.result;
-                const req = tx.objectStore(STORE_MEDIA).put(data, id);
-                req.onsuccess = () => resolve(`idb:${id}`);
-                req.onerror = () => reject(req.error);
-            };
-            reader.readAsDataURL(blob);
+            const req = tx.objectStore(STORE_MEDIA).put(data, id);
+            
+            // Handle transaction level errors/completion
+            tx.oncomplete = () => { /* committed */ };
+            tx.onerror = () => reject(tx.error);
+
+            req.onsuccess = () => resolve(`idb:${id}`);
+            req.onerror = () => reject(req.error);
         });
     } catch (e) {
         console.error("IDB Save Error:", e);
