@@ -504,7 +504,7 @@ const WalletSection: React.FC<{
   user: User; 
   transactions: Transaction[];
   onUpdateUser: (u: User) => void;
-  onWithdrawRequest: (amount: number, method: string, details: string) => void 
+  onWithdrawRequest: (amount: number, method: string, details: string) => Promise<void> 
 }> = ({ user, transactions, onUpdateUser, onWithdrawRequest }) => {
   const [withdrawAmount, setWithdrawAmount] = useState<string>('');
   const [method, setMethod] = useState('Bank Transfer');
@@ -529,21 +529,23 @@ const WalletSection: React.FC<{
     setShowConfirm(true);
   };
 
-  const confirmWithdrawal = () => {
-    setShowConfirm(false);
+  const confirmWithdrawal = async () => {
     setLoading(true);
     const amt = parseFloat(withdrawAmount);
-    setTimeout(() => {
-      const details = method === 'Crypto (USDT)' 
-        ? `Wallet: ${accountNumber} (Network: TRC20)`
-        : `${bankName} - ${accountNumber}, Country: ${country}`;
-      
-      onWithdrawRequest(amt, method, details);
-      setWithdrawAmount('');
-      setBankName('');
-      setAccountNumber('');
-      setLoading(false);
-    }, 1000);
+    const details = method === 'Crypto (USDT)' 
+      ? `Wallet: ${accountNumber} (Network: TRC20)`
+      : `${bankName} - ${accountNumber}, Country: ${country}`;
+    
+    // Process request (simulate delay + API call)
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await onWithdrawRequest(amt, method, details);
+    
+    // Cleanup
+    setWithdrawAmount('');
+    setBankName('');
+    setAccountNumber('');
+    setLoading(false);
+    setShowConfirm(false);
   };
 
   const handleDeposit = async () => {
@@ -629,7 +631,7 @@ const WalletSection: React.FC<{
                 </div>
             )}
 
-            <Button type="submit" className="w-full" isLoading={loading} disabled={user.balance < 5}>
+            <Button type="submit" className="w-full" disabled={user.balance < 5}>
               Request Withdrawal
             </Button>
           </form>
@@ -697,7 +699,7 @@ const WalletSection: React.FC<{
          </div>
       </Modal>
 
-      <Modal isOpen={showConfirm} onClose={() => setShowConfirm(false)} title="Confirm Withdrawal">
+      <Modal isOpen={showConfirm} onClose={() => !loading && setShowConfirm(false)} title="Confirm Withdrawal">
           <div className="space-y-4">
               <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg flex items-start">
                   <AlertTriangle className="w-5 h-5 mr-2 flex-shrink-0" />
@@ -707,7 +709,7 @@ const WalletSection: React.FC<{
               <div className="border rounded-lg p-4 space-y-2 bg-gray-50 dark:bg-gray-800">
                   <div className="flex justify-between">
                       <span className="text-gray-500">Amount:</span>
-                      <span className="font-bold text-lg">${parseFloat(withdrawAmount).toFixed(2)}</span>
+                      <span className="font-bold text-lg text-red-600">-${parseFloat(withdrawAmount).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                       <span className="text-gray-500">Method:</span>
@@ -720,7 +722,7 @@ const WalletSection: React.FC<{
               </div>
 
               <div className="flex space-x-3 pt-4">
-                  <Button variant="ghost" onClick={() => setShowConfirm(false)} className="flex-1">Cancel</Button>
+                  <Button variant="ghost" onClick={() => setShowConfirm(false)} className="flex-1" disabled={loading}>Cancel</Button>
                   <Button onClick={confirmWithdrawal} className="flex-1" isLoading={loading}>Confirm & Withdraw</Button>
               </div>
           </div>

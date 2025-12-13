@@ -1,7 +1,7 @@
 
 
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage, MusicTrack } from '../types';
+import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage, MusicTrack, Conversation } from '../types';
 
 // Helper to determine mode
 const USE_SUPABASE = isSupabaseConfigured();
@@ -233,10 +233,7 @@ export const storageService = {
   },
 
   async updateUserLocation(userId: string, location: {lat: number, lng: number}) {
-      // In a real app, you'd perform reverse geocoding here to get City/Country
-      // For now, we store coordinates in a metadata field or console log
       console.log(`Updated location for ${userId}:`, location);
-      // If we had a location column: await supabase.from('profiles').update({ location: location }).eq('id', userId);
   },
 
   async getUsers(): Promise<User[]> {
@@ -245,10 +242,9 @@ export const storageService = {
         : getLocal<User[]>('users', []);
   },
 
-  // --- MEDIA STORAGE (HYBRID: SUPABASE + INDEXEDDB FALLBACK) ---
+  // --- MEDIA STORAGE ---
   async uploadMedia(file: Blob | File): Promise<string> {
     let fileToUpload = file;
-    // Compress if image
     if (file instanceof File || file instanceof Blob) {
         if ((file instanceof File ? file.type : file.type).startsWith('image/')) {
             try { fileToUpload = await compressImage(file); } catch {}
@@ -259,27 +255,103 @@ export const storageService = {
         try {
             const fileExt = file instanceof File ? file.name.split('.').pop() : (file.type.includes('image') ? 'jpg' : 'webm');
             const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-            
-            // Try Supabase Storage
             const { error } = await supabase.storage.from('socialpay-media').upload(fileName, fileToUpload, { cacheControl: '3600', upsert: false });
             if (error) throw error;
-            
             const { data } = supabase.storage.from('socialpay-media').getPublicUrl(fileName);
             return data.publicUrl;
         } catch (error) {
             console.warn("Cloud upload failed, falling back to local IndexedDB storage.", error);
-            // Fallback to IndexedDB
             return await saveMediaToIDB(fileToUpload);
         }
     } else {
-        // Mock Mode -> Always IndexedDB
         return await saveMediaToIDB(fileToUpload);
     }
   },
 
+  // --- CHAT & MESSAGING ---
+  async getConversations(userId: string): Promise<Conversation[]> {
+      if (USE_SUPABASE) {
+          const { data } = await supabase.from('conversations').select('*').contains('participants', [userId]).order('last_message_time', { ascending: false });
+          return (data || []).map((c: any) => ({
+              ...c, participantNames: c.participant_names, lastMessage: c.last_message, lastMessageTime: c.last_message_time, relatedGigId: c.related_gig_id
+          }));
+      } else {
+          const all = getLocal<Conversation[]>('conversations', []);
+          return all.filter(c => c.participants.includes(userId)).sort((a,b) => b.lastMessageTime - a.lastMessageTime);
+      }
+  },
+
+  async createConversation(participants: string[], names: Record<string, string>, gigId?: string): Promise<Conversation> {
+      // Check if exists
+      const existing = await this.getConversations(participants[0]);
+      const found = existing.find(c => participants.every(p => c.participants.includes(p)) && c.relatedGigId === gigId);
+      
+      if (found) return found;
+
+      const newConv: Conversation = {
+          id: `conv_${Date.now()}`,
+          participants,
+          participantNames: names,
+          lastMessage: '',
+          lastMessageTime: Date.now(),
+          relatedGigId: gigId
+      };
+
+      if (USE_SUPABASE) {
+          await supabase.from('conversations').insert([{
+              id: newConv.id,
+              participants: newConv.participants,
+              participant_names: newConv.participantNames,
+              last_message: '',
+              last_message_time: newConv.lastMessageTime,
+              related_gig_id: gigId
+          }]);
+      } else {
+          const all = getLocal<Conversation[]>('conversations', []);
+          all.unshift(newConv);
+          setLocal('conversations', all);
+      }
+      return newConv;
+  },
+
+  async getMessages(conversationId: string): Promise<ChatMessage[]> {
+      if (USE_SUPABASE) {
+          const { data } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('timestamp', { ascending: true });
+          return (data || []).map((m: any) => ({
+              ...m, conversationId: m.conversation_id, senderId: m.sender_id, isFlagged: m.is_flagged
+          }));
+      } else {
+          const all = getLocal<ChatMessage[]>('messages', []);
+          return all.filter(m => m.conversationId === conversationId).sort((a, b) => a.timestamp - b.timestamp);
+      }
+  },
+
+  async sendMessage(msg: ChatMessage) {
+      // Update Conversation Last Message
+      if (USE_SUPABASE) {
+          await supabase.from('messages').insert([{
+              conversation_id: msg.conversationId, sender_id: msg.senderId, text: msg.text, timestamp: msg.timestamp, is_flagged: msg.isFlagged
+          }]);
+          await supabase.from('conversations').update({
+              last_message: msg.text,
+              last_message_time: msg.timestamp
+          }).eq('id', msg.conversationId);
+      } else {
+          const msgs = getLocal<ChatMessage[]>('messages', []);
+          msgs.push(msg);
+          setLocal('messages', msgs);
+
+          const convs = getLocal<Conversation[]>('conversations', []);
+          const idx = convs.findIndex(c => c.id === msg.conversationId);
+          if (idx !== -1) {
+              convs[idx].lastMessage = msg.text;
+              convs[idx].lastMessageTime = msg.timestamp;
+              setLocal('conversations', convs);
+          }
+      }
+  },
+
   // --- GENERIC DATA OPERATIONS ---
-  
-  // Campaigns
   async getCampaigns(): Promise<Campaign[]> {
       if(USE_SUPABASE) {
           const { data } = await supabase.from('campaigns').select('*').order('created_at', {ascending: false});
@@ -346,7 +418,6 @@ export const storageService = {
       }
   },
 
-
   // Videos
   async getVideos(p=0, l=5): Promise<Video[]> {
       if(USE_SUPABASE) {
@@ -387,52 +458,28 @@ export const storageService = {
       if(USE_SUPABASE) await supabase.from('gigs').delete().eq('id', id);
       else { const l = getLocal<Gig[]>('gigs', []); setLocal('gigs', l.filter(x=>x.id!==id)); }
   },
-  // Specific Logic for Processing a Gig Order (Releasing funds with fee deduction)
+  
   async processGigOrder(transactionId: string): Promise<{success: boolean}> {
-      // Logic: 
-      // 1. Find transaction
-      // 2. Mark as completed
-      // 3. Find Gig -> Get seller
-      // 4. Calculate 70% of amount
-      // 5. Add 70% to seller's balance
-      // 6. Create earning record for seller
-      // 7. Create fee record for admin (implicit or explicit)
-
+      // Logic for releasing order funds
       if(USE_SUPABASE) {
-          // This would typically be a Postgres Function/RPC for atomicity. 
-          // For now, client-side orchestration (not ideal for production but functional for demo).
           const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single();
           if(!tx) return {success: false};
 
           const sellerEarnings = tx.amount * 0.70;
-          
-          // Get Gig to find Seller
           const { data: gig } = await supabase.from('gigs').select('seller_id').eq('id', tx.related_gig_id).single();
           if(!gig) return {success: false};
 
-          // Update Transaction
           await supabase.from('transactions').update({status: 'completed'}).eq('id', transactionId);
 
-          // Update Seller Balance
           const { data: seller } = await supabase.from('profiles').select('*').eq('id', gig.seller_id).single();
           if(seller) {
               await supabase.from('profiles').update({balance: seller.balance + sellerEarnings}).eq('id', gig.seller_id);
-              
-              // Create Earning Record for Seller
               await supabase.from('transactions').insert([{
-                  user_id: seller.id,
-                  user_name: seller.name,
-                  amount: sellerEarnings,
-                  type: 'earning',
-                  status: 'completed',
-                  method: 'Gig Sale',
-                  details: `Sale: ${tx.details} (after 30% fee)`,
-                  timestamp: Date.now()
+                  user_id: seller.id, user_name: seller.name, amount: sellerEarnings, type: 'earning', status: 'completed', method: 'Gig Sale', details: `Sale: ${tx.details} (after 30% fee)`, timestamp: Date.now()
               }]);
           }
           return {success: true};
       } else {
-          // Local Storage Logic
           const transactions = getLocal<Transaction[]>('transactions', []);
           const txIndex = transactions.findIndex(t => t.id === transactionId);
           if (txIndex === -1) return {success: false};
@@ -440,34 +487,21 @@ export const storageService = {
           const tx = transactions[txIndex];
           const sellerEarnings = tx.amount * 0.70;
 
-          // Update Transaction
           transactions[txIndex].status = 'completed';
           setLocal('transactions', transactions);
 
-          // Find Gig
           const gigs = getLocal<Gig[]>('gigs', []);
           const gig = gigs.find(g => g.id === tx.relatedGigId);
           if (!gig) return {success: false};
 
-          // Update Seller
           const users = getLocal<User[]>('users', []);
           const sellerIndex = users.findIndex(u => u.id === gig.sellerId);
           if (sellerIndex !== -1) {
               users[sellerIndex].balance += sellerEarnings;
               setLocal('users', users);
-              
-              // Add Earning Transaction for Seller
               transactions.unshift({
-                  id: Date.now().toString(),
-                  userId: users[sellerIndex].id,
-                  userName: users[sellerIndex].name,
-                  amount: sellerEarnings,
-                  type: 'earning',
-                  status: 'completed',
-                  method: 'Gig Sale',
-                  details: `Sale: ${tx.details} (after 30% fee)`,
-                  timestamp: Date.now()
-              } as any); // Cast because relatedGigId optional
+                  id: Date.now().toString(), userId: users[sellerIndex].id, userName: users[sellerIndex].name, amount: sellerEarnings, type: 'earning', status: 'completed', method: 'Gig Sale', details: `Sale: ${tx.details} (after 30% fee)`, timestamp: Date.now()
+              } as any);
               setLocal('transactions', transactions);
           }
           return {success: true};

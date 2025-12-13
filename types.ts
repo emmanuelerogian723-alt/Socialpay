@@ -114,12 +114,22 @@ export interface Draft {
     timestamp: number;
 }
 
+export interface Conversation {
+    id: string;
+    participants: string[]; // User IDs
+    participantNames: Record<string, string>; // ID -> Name mapping for easy lookup
+    lastMessage: string;
+    lastMessageTime: number;
+    relatedGigId?: string;
+}
+
 export interface ChatMessage {
     id: string;
+    conversationId: string;
     senderId: string;
-    receiverId: string;
     text: string;
     timestamp: number;
+    isFlagged?: boolean; // True if AI detects fraud/scam attempt
 }
 
 export interface Gig {

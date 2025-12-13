@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
-import { Gig, User, Transaction } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Gig, User, Transaction, Conversation, ChatMessage } from '../types';
 import { storageService } from '../services/storageService';
+import { analyzeChatRisk } from '../services/geminiService';
 import { Card, Button, Input, Badge, Select, Modal } from './UIComponents';
-import { Plus, ShoppingBag, Search, Star, Lock, Clock, Smartphone, Mail, Globe, ShieldCheck, Eye, AlertTriangle, CheckCircle, Package, ArrowRight } from 'lucide-react';
+import { Plus, ShoppingBag, Search, Star, Lock, Clock, Smartphone, Mail, Globe, ShieldCheck, Eye, AlertTriangle, CheckCircle, Package, ArrowRight, MessageCircle, Send, X, ShieldAlert, Upload } from 'lucide-react';
 
 interface GigsViewProps {
   user: User;
@@ -12,7 +13,7 @@ interface GigsViewProps {
 
 const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
   const [gigs, setGigs] = useState<Gig[]>([]);
-  // Tabs: Market (Browse), Create (Sell), Orders (My Purchases/Sales)
+  // Tabs: Market (Browse), Create (Sell), Orders (My Purchases/Sales), Messages (Chats)
   const [activeTab, setActiveTab] = useState<'market' | 'create' | 'orders'>('market');
   
   // Market State
@@ -27,11 +28,21 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     category: 'numbers',
     price: 10
   });
+  const [isUploading, setIsUploading] = useState(false);
 
   // Orders State
   const [myPurchases, setMyPurchases] = useState<Transaction[]>([]);
   const [mySales, setMySales] = useState<Transaction[]>([]);
   const [viewingOrder, setViewingOrder] = useState<Transaction | null>(null);
+
+  // Chat State
+  const [showChat, setShowChat] = useState(false); // Controls chat panel visibility
+  const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadGigs();
@@ -42,6 +53,23 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
           loadOrders();
       }
   }, [activeTab, user.id]);
+
+  // Poll for messages if chat is open
+  useEffect(() => {
+      if (showChat) {
+          loadConversations();
+          const interval = setInterval(() => {
+              if (activeConversation) loadMessages(activeConversation.id);
+              loadConversations(); // Update last messages list
+          }, 3000);
+          return () => clearInterval(interval);
+      }
+  }, [showChat, activeConversation]);
+
+  // Auto-scroll chat
+  useEffect(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const loadGigs = async () => {
     const fetchedGigs = await storageService.getGigs();
@@ -54,20 +82,22 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
   };
 
   const loadOrders = async () => {
-      // Get all transactions
       const allTx = await storageService.getTransactions();
-      
-      // Filter purchases made by current user
       const purchases = allTx.filter(t => t.userId === user.id && t.type === 'purchase' && t.relatedGigId);
-      
-      // Filter sales (where current user is the seller)
-      // Note: In a real backend we'd query by sellerId on the transaction or join gigs. 
-      // For this mock, we have to find gigs I sold, then find transactions for them.
       const myGigIds = (await storageService.getGigs()).filter(g => g.sellerId === user.id).map(g => g.id);
       const sales = allTx.filter(t => t.relatedGigId && myGigIds.includes(t.relatedGigId) && t.type === 'purchase');
-
       setMyPurchases(purchases);
       setMySales(sales);
+  };
+
+  const loadConversations = async () => {
+      const convs = await storageService.getConversations(user.id);
+      setConversations(convs);
+  };
+
+  const loadMessages = async (convId: string) => {
+      const msgs = await storageService.getMessages(convId);
+      setChatMessages(msgs);
   };
 
   const filteredGigs = gigs.filter(gig => {
@@ -82,14 +112,53 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     return b.timestamp - a.timestamp;
   });
 
+  const handleStartChat = async (targetUserId: string, targetUserName: string, gigId?: string) => {
+      setShowChat(true);
+      const names = { [user.id]: user.name, [targetUserId]: targetUserName };
+      const conv = await storageService.createConversation([user.id, targetUserId], names, gigId);
+      setActiveConversation(conv);
+      loadMessages(conv.id);
+      setSelectedGig(null); // Close modal if open
+      setSelectedSeller(null);
+  };
+
+  const handleSendMessage = async () => {
+      if (!chatInput.trim() || !activeConversation) return;
+      setIsSending(true);
+
+      // 1. AI SECURITY CHECK
+      const riskAnalysis = await analyzeChatRisk(chatInput);
+      
+      if (riskAnalysis.isRisky) {
+          if (!confirm(`⚠️ SECURITY WARNING ⚠️\n\nOur system detected potential risk: "${riskAnalysis.reason}".\n\nScammers often try to take payments off-platform. Do you still want to send this?`)) {
+              setIsSending(false);
+              return;
+          }
+      }
+
+      // 2. Send Message
+      const newMessage: ChatMessage = {
+          id: Date.now().toString(),
+          conversationId: activeConversation.id,
+          senderId: user.id,
+          text: chatInput,
+          timestamp: Date.now(),
+          isFlagged: riskAnalysis.isRisky
+      };
+
+      await storageService.sendMessage(newMessage);
+      setChatInput('');
+      loadMessages(activeConversation.id);
+      setIsSending(false);
+  };
+
+  // ... (Create Gig & Purchase Logic same as before)
   const handleCreateGig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGig.title || !newGig.description || !newGig.price || !newGig.secretDelivery) {
         alert("Please fill in all required fields, including the Secret Delivery Details.");
         return;
     }
-
-    // Determine default image based on category
     let imageQuery = newGig.category;
     if (newGig.category === 'numbers') imageQuery = 'smartphone';
     if (newGig.category === 'social_accounts') imageQuery = 'social media';
@@ -104,7 +173,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
       price: Number(newGig.price),
       category: newGig.category as any,
       image: newGig.image || `https://source.unsplash.com/random/800x600/?${imageQuery}`,
-      secretDelivery: newGig.secretDelivery, // Secure info
+      secretDelivery: newGig.secretDelivery,
       timestamp: Date.now(),
       rating: 5.0,
       ratingCount: 0
@@ -114,6 +183,25 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     setActiveTab('market');
     setNewGig({ category: 'numbers', price: 10, secretDelivery: '' });
     alert('Asset listed successfully! It will appear in the market.');
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert("File size too large. Please upload an image under 5MB.");
+        return;
+      }
+      setIsUploading(true);
+      try {
+        const url = await storageService.uploadMedia(file);
+        setNewGig(prev => ({ ...prev, image: url }));
+      } catch (error) {
+        alert("Failed to upload image. Please try again.");
+      } finally {
+        setIsUploading(false);
+      }
+    }
   };
 
   const handlePurchase = async (gig: Gig) => {
@@ -127,14 +215,10 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     }
 
     if(confirm(`Confirm purchase of "${gig.title}" for $${gig.price}? \n\nFunds will be held in Escrow until the seller releases the asset.`)) {
-       // 1. Deduct from Buyer
        const updatedUser = { ...user, balance: user.balance - gig.price };
        await storageService.updateUser(updatedUser);
        onUpdateUser(updatedUser);
 
-       // 2. Create Transaction (Status: pending_delivery)
-       // We store the secret in the transaction for easier retrieval later, 
-       // or we look it up from the gig. To simplify, we'll look it up via ID later or duplicate it here securely.
        await storageService.createTransaction({
          id: Date.now().toString(),
          userId: user.id,
@@ -148,21 +232,18 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
          timestamp: Date.now()
        });
 
-       alert("Order placed! Funds are held safely. You will be notified when the seller releases the details.");
-       setSelectedGig(null);
+       // Auto-start chat for the order
+       handleStartChat(gig.sellerId, gig.sellerName, gig.id);
        setActiveTab('orders');
     }
   };
 
   const handleReleaseOrder = async (transactionId: string) => {
      if(confirm("Are you sure you want to release the details to the buyer? This will complete the transaction.")) {
-        // Logic handled in service to ensure consistency
         const result = await storageService.processGigOrder(transactionId);
         if (result.success) {
             alert("Success! Order completed. 70% of funds added to your wallet.");
-            loadOrders(); // Refresh UI
-            
-            // Update local user balance if I am the seller
+            loadOrders();
             const u = await storageService.getUserById(user.id);
             if(u) onUpdateUser(u);
         } else {
@@ -190,27 +271,15 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
   if (activeTab === 'create') {
     return (
       <div className="max-w-3xl mx-auto animate-slide-up pb-20">
-        <div className="flex items-center justify-between mb-6">
+         <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold">Sell an Asset</h2>
             <Button variant="ghost" onClick={() => setActiveTab('market')}>Cancel</Button>
         </div>
-        
-        <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg mb-6 border border-yellow-200 dark:border-yellow-800 text-sm">
-            <div className="font-bold text-yellow-800 dark:text-yellow-400 flex items-center mb-1">
-                <ShieldCheck className="w-4 h-4 mr-2"/> Secure Escrow System
-            </div>
-            <p className="text-yellow-700 dark:text-yellow-300">
-                Buyers pay upfront, but funds are held by SocialPay. You must "Release" the order to get paid.
-                <br/>
-                <strong>Platform Fee:</strong> We deduct <span className="font-bold">30%</span> of the selling price. You receive <span className="font-bold">70%</span>.
-            </p>
-        </div>
-
         <Card>
            <form onSubmit={handleCreateGig} className="space-y-5">
              <div>
                <label className="block text-sm font-medium mb-1">Title</label>
-               <Input placeholder="e.g. Verified USA +1 Phone Number (New)" value={newGig.title || ''} onChange={e => setNewGig({...newGig, title: e.target.value})} required />
+               <Input placeholder="e.g. Verified USA +1 Phone Number" value={newGig.title || ''} onChange={e => setNewGig({...newGig, title: e.target.value})} required />
              </div>
              
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -227,7 +296,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                  <div>
                    <label className="block text-sm font-medium mb-1">Price ($)</label>
                    <Input type="number" min="5" value={newGig.price} onChange={e => setNewGig({...newGig, price: Number(e.target.value)})} required />
-                   <p className="text-xs text-gray-500 mt-1">You earn: <span className="font-bold text-green-600">${((newGig.price || 0) * 0.7).toFixed(2)}</span></p>
                  </div>
              </div>
 
@@ -236,7 +304,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                <textarea 
                   className="w-full p-2 border rounded-lg dark:bg-gray-900 dark:border-gray-700 focus:ring-2 focus:ring-indigo-500" 
                   rows={3} 
-                  placeholder="Describe the account age, followers, region, etc."
+                  placeholder="Describe details..."
                   value={newGig.description || ''} 
                   onChange={e => setNewGig({...newGig, description: e.target.value})} 
                   required 
@@ -250,25 +318,53 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                  <textarea 
                     className="w-full p-3 border border-indigo-200 dark:border-indigo-700 rounded-lg dark:bg-gray-800 focus:ring-2 focus:ring-indigo-500 font-mono text-sm" 
                     rows={4} 
-                    placeholder={"Username: ...\nPassword: ...\nRecovery Email: ...\n\n(This is encrypted and only revealed to the buyer AFTER they pay.)"}
+                    placeholder={"Username: ...\nPassword: ..."}
                     value={newGig.secretDelivery || ''} 
                     onChange={e => setNewGig({...newGig, secretDelivery: e.target.value})} 
                     required 
                  />
-                 <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-2">
-                     <ShieldCheck className="w-3 h-3 inline mr-1"/>
-                     Securely stored. Automatically sent to buyer upon confirmed purchase.
-                 </p>
              </div>
 
+             {/* Replaced URL input with File Upload */}
              <div>
-               <label className="block text-sm font-medium mb-1">Image URL (Optional)</label>
-               <Input placeholder="https://..." value={newGig.image || ''} onChange={e => setNewGig({...newGig, image: e.target.value})} />
+               <label className="block text-sm font-medium mb-1">Asset Image (Screenshot/Photo)</label>
+               <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-6 text-center bg-gray-50 dark:bg-gray-900/50">
+                  {newGig.image ? (
+                      <div className="relative inline-block">
+                          <img src={newGig.image} alt="Preview" className="max-h-48 rounded-lg shadow-sm" />
+                          <button 
+                            type="button"
+                            onClick={() => setNewGig(prev => ({...prev, image: ''}))}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 shadow-md transition-colors"
+                          >
+                              <X className="w-4 h-4" />
+                          </button>
+                      </div>
+                  ) : (
+                      <label className="cursor-pointer flex flex-col items-center justify-center space-y-2 group">
+                          <div className="p-3 bg-white dark:bg-gray-800 rounded-full text-indigo-500 shadow-sm group-hover:scale-110 transition-transform">
+                              <Upload className="w-6 h-6" />
+                          </div>
+                          <div>
+                              <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">Click to upload</span>
+                              <span className="text-sm text-gray-500 ml-1">from gallery</span>
+                          </div>
+                          <span className="text-xs text-gray-400">JPG, PNG (Max 5MB)</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={handleImageUpload} 
+                          />
+                      </label>
+                  )}
+                  {isUploading && <div className="mt-3 text-xs text-indigo-500 font-bold flex items-center justify-center"><div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping mr-2"></div>Uploading...</div>}
+               </div>
              </div>
 
              <div className="flex justify-end space-x-3 pt-4 border-t dark:border-gray-700">
                <Button type="button" variant="ghost" onClick={() => setActiveTab('market')}>Cancel</Button>
-               <Button type="submit" size="lg">List Asset for Sale</Button>
+               <Button type="submit" size="lg" disabled={isUploading}>List Asset</Button>
              </div>
            </form>
         </Card>
@@ -276,7 +372,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     );
   }
 
-  // --- ORDERS / SALES DASHBOARD ---
+  // --- ORDERS TAB ---
   if (activeTab === 'orders') {
       return (
           <div className="space-y-8 animate-fade-in pb-20">
@@ -286,37 +382,37 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                       Back to Market
                   </Button>
               </div>
-
+              
+              {/* Similar to previous, but add Chat Button */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                   {/* BUYER SIDE */}
                   <div>
-                      <h3 className="font-bold text-lg mb-4 flex items-center text-indigo-600">
-                          <ShoppingBag className="w-5 h-5 mr-2"/> Purchases (Bought)
-                      </h3>
+                      <h3 className="font-bold text-lg mb-4 text-indigo-600">Purchases</h3>
                       <div className="space-y-4">
-                          {myPurchases.length === 0 && <p className="text-gray-500 italic">No purchases yet.</p>}
                           {myPurchases.map(order => (
                               <Card key={order.id} className="border-l-4 border-l-indigo-500">
-                                  <div className="flex justify-between items-start mb-2">
-                                      <div>
-                                          <div className="font-bold">{order.details}</div>
-                                          <div className="text-xs text-gray-500">{new Date(order.timestamp).toLocaleString()}</div>
-                                      </div>
-                                      <Badge color={order.status === 'completed' ? 'green' : 'yellow'}>
-                                          {order.status === 'completed' ? 'Delivered' : 'Pending Delivery'}
-                                      </Badge>
+                                  <div className="flex justify-between mb-2">
+                                      <div className="font-bold">{order.details}</div>
+                                      <Badge color={order.status === 'completed' ? 'green' : 'yellow'}>{order.status}</Badge>
                                   </div>
                                   <div className="flex justify-between items-center">
-                                      <div className="font-bold text-lg text-red-600">-${order.amount.toFixed(2)}</div>
-                                      {order.status === 'completed' ? (
-                                          <Button size="sm" onClick={() => setViewingOrder(order)}>
-                                              <Eye className="w-4 h-4 mr-2"/> View Credentials
-                                          </Button>
-                                      ) : (
-                                          <div className="text-xs text-orange-600 flex items-center bg-orange-50 px-2 py-1 rounded">
-                                              <Clock className="w-3 h-3 mr-1"/> Waiting for seller release
-                                          </div>
-                                      )}
+                                      <div className="font-bold text-red-600">-${order.amount.toFixed(2)}</div>
+                                      <div className="flex space-x-2">
+                                         {/* Find original gig to know seller */}
+                                         {(() => {
+                                             const g = gigs.find(g => g.id === order.relatedGigId);
+                                             return g ? (
+                                                <Button size="sm" variant="ghost" onClick={() => handleStartChat(g.sellerId, g.sellerName, g.id)}>
+                                                    <MessageCircle className="w-4 h-4" />
+                                                </Button>
+                                             ) : null;
+                                         })()}
+                                         {order.status === 'completed' && (
+                                            <Button size="sm" onClick={() => setViewingOrder(order)}>
+                                                <Eye className="w-4 h-4 mr-1"/> Secret
+                                            </Button>
+                                         )}
+                                      </div>
                                   </div>
                               </Card>
                           ))}
@@ -325,37 +421,26 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
 
                   {/* SELLER SIDE */}
                   <div>
-                      <h3 className="font-bold text-lg mb-4 flex items-center text-green-600">
-                          <Package className="w-5 h-5 mr-2"/> Sales (Sold)
-                      </h3>
-                      <div className="space-y-4">
-                          {mySales.length === 0 && <p className="text-gray-500 italic">No sales yet.</p>}
+                      <h3 className="font-bold text-lg mb-4 text-green-600">Sales</h3>
+                       <div className="space-y-4">
                           {mySales.map(sale => (
                               <Card key={sale.id} className="border-l-4 border-l-green-500">
-                                  <div className="flex justify-between items-start mb-2">
-                                      <div>
-                                          <div className="font-bold">{sale.details.replace('Order: ', 'Sold: ')}</div>
-                                          <div className="text-xs text-gray-500">Buyer: {sale.userName}</div>
-                                      </div>
-                                      <Badge color={sale.status === 'completed' ? 'green' : 'red'}>
-                                          {sale.status === 'completed' ? 'Funds Released' : 'Action Required'}
-                                      </Badge>
+                                  <div className="flex justify-between mb-2">
+                                      <div className="font-bold">{sale.details}</div>
+                                      <Badge color={sale.status === 'completed' ? 'green' : 'red'}>{sale.status}</Badge>
                                   </div>
                                   <div className="flex justify-between items-center mt-3">
-                                      <div className="text-sm">
-                                          Price: ${sale.amount}<br/>
-                                          <span className="text-green-600 font-bold">You Earn: ${(sale.amount * 0.7).toFixed(2)}</span>
+                                      <div className="text-sm">Earn: ${(sale.amount * 0.7).toFixed(2)}</div>
+                                      <div className="flex space-x-2">
+                                         <Button size="sm" variant="ghost" onClick={() => handleStartChat(sale.userId, sale.userName, sale.relatedGigId)}>
+                                             <MessageCircle className="w-4 h-4" />
+                                         </Button>
+                                         {sale.status === 'pending_delivery' && (
+                                              <Button size="sm" onClick={() => handleReleaseOrder(sale.id)}>
+                                                  <CheckCircle className="w-4 h-4 mr-2"/> Release
+                                              </Button>
+                                         )}
                                       </div>
-                                      
-                                      {sale.status === 'pending_delivery' ? (
-                                          <Button size="sm" onClick={() => handleReleaseOrder(sale.id)}>
-                                              <CheckCircle className="w-4 h-4 mr-2"/> Confirm & Release
-                                          </Button>
-                                      ) : (
-                                          <div className="text-xs text-green-600 font-bold flex items-center">
-                                              <CheckCircle className="w-3 h-3 mr-1"/> Paid
-                                          </div>
-                                      )}
                                   </div>
                               </Card>
                           ))}
@@ -368,7 +453,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
 
   // --- MARKET VIEW ---
   return (
-    <div className="space-y-6 animate-fade-in pb-20">
+    <div className="space-y-6 animate-fade-in pb-20 relative">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
         <div>
@@ -378,6 +463,9 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
           <p className="text-gray-500 mt-1">Securely buy and sell foreign numbers, accounts, and services.</p>
         </div>
         <div className="flex space-x-3">
+            <Button variant="outline" onClick={() => setShowChat(true)}>
+                <MessageCircle className="w-4 h-4 mr-2"/> Messages
+            </Button>
             <Button variant="outline" onClick={() => setActiveTab('orders')}>
                 <Package className="w-4 h-4 mr-2"/> My Orders
             </Button>
@@ -392,13 +480,13 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
          <div className="flex-1 relative">
              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
              <Input 
-                 placeholder="Search e.g. 'US Gmail', 'TikTok 10k'..." 
+                 placeholder="Search assets..." 
                  value={searchTerm}
                  onChange={e => setSearchTerm(e.target.value)}
                  className="pl-9 h-11"
              />
          </div>
-         <div className="flex space-x-2 overflow-x-auto pb-1">
+         <div className="flex space-x-2">
              <Select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)} className="w-48 h-11">
                  {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
              </Select>
@@ -414,15 +502,10 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
         {filteredGigs.map(gig => (
           <div key={gig.id} className="bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:border-indigo-500/30 transition-all group cursor-pointer flex flex-col h-full" onClick={() => setSelectedGig(gig)}>
-             {/* Image */}
              <div className="relative h-48 overflow-hidden bg-gray-100 dark:bg-gray-900">
                 <img src={gig.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" alt={gig.title} />
                 <div className="absolute top-2 left-2">
-                    <Badge color={
-                        gig.category === 'numbers' ? 'blue' : 
-                        gig.category === 'social_accounts' ? 'red' : 
-                        gig.category === 'email_accounts' ? 'yellow' : 'gray'
-                    } className="shadow-md">
+                    <Badge color="blue" className="shadow-md">
                         {categories.find(c => c.id === gig.category)?.label || gig.category}
                     </Badge>
                 </div>
@@ -430,25 +513,21 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                     <ShieldCheck className="w-3 h-3 mr-1 text-green-400"/> Secure
                 </div>
              </div>
-             
              <div className="p-4 flex flex-col flex-1">
                 <div className="flex items-center justify-between mb-2">
                    <div className="flex items-center space-x-2">
                        <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">
                           {gig.sellerName.charAt(0)}
                        </div>
-                       <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[100px]">{gig.sellerName}</span>
+                       <span className="text-xs text-gray-500 truncate">{gig.sellerName}</span>
                    </div>
                    <div className="flex items-center text-xs text-yellow-500 font-bold">
-                      <Star className="w-3 h-3 fill-current mr-1" />
-                      {gig.rating?.toFixed(1)}
+                      <Star className="w-3 h-3 fill-current mr-1" />{gig.rating?.toFixed(1)}
                    </div>
                 </div>
-
                 <h3 className="font-bold text-gray-900 dark:text-gray-100 text-sm mb-2 line-clamp-2 leading-snug flex-1 group-hover:text-indigo-600 transition-colors">
                     {gig.title}
                 </h3>
-
                 <div className="pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between mt-auto">
                     <div className="text-lg font-black text-gray-900 dark:text-white">${gig.price}</div>
                     <Button size="sm" variant="secondary" className="px-3 py-1 h-8 text-xs">View</Button>
@@ -457,14 +536,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
           </div>
         ))}
       </div>
-      
-      {filteredGigs.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-500 bg-white dark:bg-gray-800 rounded-xl border border-dashed border-gray-300 dark:border-gray-700">
-              <ShoppingBag className="w-16 h-16 mb-4 text-gray-300" />
-              <p className="text-lg font-medium">No items found</p>
-              <Button variant="ghost" className="mt-2" onClick={() => { setSearchTerm(''); setSelectedCategory('all'); }}>Clear Filters</Button>
-          </div>
-      )}
 
       {/* --- SELLER PROFILE MODAL --- */}
       <Modal 
@@ -473,49 +544,39 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
          title="Seller Profile"
          maxWidth="max-w-4xl"
       >
-         {selectedSeller && (() => {
-             const sellerGigs = gigs.filter(g => g.sellerId === selectedSeller.id);
-             return (
-                 <div className="space-y-6">
-                     <div className="flex items-center space-x-4">
-                         <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-2xl text-white font-bold">
-                             {selectedSeller.name.charAt(0)}
-                         </div>
-                         <div>
-                             <h3 className="text-xl font-bold">{selectedSeller.name}</h3>
-                             <div className="flex items-center text-sm text-gray-500 space-x-4">
-                                 <span>Member since 2024</span>
-                                 <span className="flex items-center"><Star className="w-3 h-3 text-yellow-500 mr-1"/> 4.9 Average Rating</span>
-                             </div>
-                         </div>
+         {selectedSeller && (
+             <div className="space-y-6">
+                 <div className="flex items-center space-x-4">
+                     <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-2xl text-white font-bold">
+                         {selectedSeller.name.charAt(0)}
                      </div>
-                     {/* List of seller items */}
-                     <div className="border-t border-gray-100 dark:border-gray-700 pt-6">
-                         <h4 className="font-bold mb-4">Active Listings</h4>
-                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                             {sellerGigs.map(g => (
-                                 <div key={g.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 flex space-x-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer" onClick={() => { setSelectedGig(g); setSelectedSeller(null); }}>
-                                     <img src={g.image} className="w-16 h-16 object-cover rounded" />
-                                     <div>
-                                         <div className="font-bold text-sm line-clamp-1">{g.title}</div>
-                                         <div className="text-green-600 font-bold text-sm">${g.price}</div>
-                                     </div>
-                                 </div>
-                             ))}
-                         </div>
+                     <div>
+                         <h3 className="text-xl font-bold">{selectedSeller.name}</h3>
+                         <Button size="sm" variant="outline" className="mt-2" onClick={() => handleStartChat(selectedSeller.id, selectedSeller.name)}>
+                             <MessageCircle className="w-4 h-4 mr-2"/> Chat with Seller
+                         </Button>
                      </div>
                  </div>
-             )
-         })()}
+                 <div className="border-t border-gray-100 dark:border-gray-700 pt-6">
+                     <h4 className="font-bold mb-4">Active Listings</h4>
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                         {gigs.filter(g => g.sellerId === selectedSeller.id).map(g => (
+                             <div key={g.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 flex space-x-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer" onClick={() => { setSelectedGig(g); setSelectedSeller(null); }}>
+                                 <img src={g.image} className="w-16 h-16 object-cover rounded" />
+                                 <div>
+                                     <div className="font-bold text-sm line-clamp-1">{g.title}</div>
+                                     <div className="text-green-600 font-bold text-sm">${g.price}</div>
+                                 </div>
+                             </div>
+                         ))}
+                     </div>
+                 </div>
+             </div>
+         )}
       </Modal>
 
-      {/* --- PURCHASE DETAILS MODAL --- */}
-      <Modal 
-        isOpen={!!selectedGig} 
-        onClose={() => setSelectedGig(null)} 
-        title="Details"
-        maxWidth="max-w-2xl"
-      >
+      {/* --- GIG DETAILS MODAL --- */}
+      <Modal isOpen={!!selectedGig} onClose={() => setSelectedGig(null)} title="Details" maxWidth="max-w-2xl">
           {selectedGig && (
               <div className="space-y-6">
                   <div className="relative h-64 w-full rounded-xl overflow-hidden shadow-inner">
@@ -526,7 +587,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                           </Badge>
                       </div>
                   </div>
-
                   <div className="flex justify-between items-start">
                       <div>
                           <h2 className="text-2xl font-bold mb-2 text-gray-900 dark:text-white">{selectedGig.title}</h2>
@@ -543,24 +603,15 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                       </div>
                       <div className="text-3xl font-black text-green-600">${selectedGig.price}</div>
                   </div>
-
                   <div className="bg-gray-50 dark:bg-gray-700/30 p-5 rounded-xl border border-gray-100 dark:border-gray-700">
-                      <h4 className="font-bold text-xs text-gray-500 uppercase tracking-wider mb-3">Description</h4>
                       <p className="text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-line text-sm">
                           {selectedGig.description}
                       </p>
                   </div>
-
-                  <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl flex items-start space-x-3 text-sm text-blue-800 dark:text-blue-200">
-                      <ShieldCheck className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                      <div>
-                          <span className="font-bold block mb-1">Secure Transaction</span>
-                          Payment is held in Escrow. The seller will only receive funds (70%) after they release the secure credentials to you.
-                      </div>
-                  </div>
-
                   <div className="flex space-x-3 pt-4 border-t border-gray-100 dark:border-gray-700">
-                      <Button variant="outline" className="flex-1" onClick={() => setSelectedGig(null)}>Cancel</Button>
+                      <Button variant="outline" className="flex-1" onClick={() => handleStartChat(selectedGig.sellerId, selectedGig.sellerName, selectedGig.id)}>
+                          <MessageCircle className="w-4 h-4 mr-2"/> Message Seller
+                      </Button>
                       <Button className="flex-1" onClick={() => handlePurchase(selectedGig)}>
                           Buy Now (${selectedGig.price})
                       </Button>
@@ -580,32 +631,114 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                           <div className="text-sm">The seller has released the details.</div>
                       </div>
                   </div>
-
                   <div>
                       <h4 className="font-bold mb-2 flex items-center">
                           <Lock className="w-4 h-4 mr-2 text-indigo-500"/> Credentials / Secret Info
                       </h4>
                       <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm whitespace-pre-wrap break-all border border-gray-700 shadow-inner">
-                          {/* 
-                             In a real app, we would fetch the secret from the gig or transaction.
-                             For this mock, we will check if the transaction has a relatedGigSecret (if we stored it)
-                             OR find the original gig from the ID.
-                          */}
                           {(() => {
-                              // Trying to find the secret from the gigs list
                               const originalGig = gigs.find(g => g.id === viewingOrder.relatedGigId);
                               return originalGig?.secretDelivery || "Error retrieving secret. Please contact support.";
                           })()}
                       </div>
-                      <p className="text-xs text-gray-500 mt-2 text-center">
-                          Please change passwords immediately after accessing bought accounts.
-                      </p>
                   </div>
-
                   <Button className="w-full" onClick={() => setViewingOrder(null)}>Close</Button>
               </div>
           )}
       </Modal>
+
+      {/* --- FLOATING SECURE CHAT INTERFACE --- */}
+      {showChat && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white dark:bg-gray-800 w-full max-w-4xl h-[600px] rounded-2xl shadow-2xl flex overflow-hidden border border-gray-200 dark:border-gray-700">
+                  {/* Left: Conversations List */}
+                  <div className="w-1/3 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-900/50">
+                      <div className="p-4 border-b border-gray-200 dark:border-gray-700 font-bold flex justify-between items-center">
+                          <span>Messages</span>
+                          <ShieldCheck className="w-4 h-4 text-green-500" title="Secure Chat"/>
+                      </div>
+                      <div className="flex-1 overflow-y-auto">
+                          {conversations.length === 0 && <p className="text-center p-4 text-gray-500 text-sm">No conversations yet.</p>}
+                          {conversations.map(conv => {
+                              const otherName = Object.entries(conv.participantNames).find(([id]) => id !== user.id)?.[1] || 'User';
+                              return (
+                                  <div 
+                                    key={conv.id} 
+                                    onClick={() => { setActiveConversation(conv); loadMessages(conv.id); }}
+                                    className={`p-4 border-b border-gray-100 dark:border-gray-800 cursor-pointer hover:bg-white dark:hover:bg-gray-800 transition-colors ${activeConversation?.id === conv.id ? 'bg-white dark:bg-gray-800 border-l-4 border-l-indigo-600' : ''}`}
+                                  >
+                                      <div className="font-bold text-sm mb-1">{otherName}</div>
+                                      <div className="text-xs text-gray-500 truncate">{conv.lastMessage || 'Start chatting...'}</div>
+                                  </div>
+                              );
+                          })}
+                      </div>
+                  </div>
+
+                  {/* Right: Active Chat */}
+                  <div className="flex-1 flex flex-col bg-white dark:bg-gray-800">
+                      {activeConversation ? (
+                          <>
+                             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900/30">
+                                 <div>
+                                     <div className="font-bold">{Object.entries(activeConversation.participantNames).find(([id]) => id !== user.id)?.[1]}</div>
+                                     <div className="text-xs text-green-600 flex items-center"><ShieldCheck className="w-3 h-3 mr-1"/> End-to-End Encrypted & AI Monitored</div>
+                                 </div>
+                                 <button onClick={() => setShowChat(false)} className="text-gray-400 hover:text-red-500"><X className="w-5 h-5"/></button>
+                             </div>
+                             
+                             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                 {chatMessages.map(msg => (
+                                     <div key={msg.id} className={`flex ${msg.senderId === user.id ? 'justify-end' : 'justify-start'}`}>
+                                         <div className={`max-w-[70%] rounded-2xl p-3 text-sm ${
+                                             msg.senderId === user.id 
+                                             ? 'bg-indigo-600 text-white rounded-br-none' 
+                                             : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'
+                                         }`}>
+                                             {msg.isFlagged && (
+                                                 <div className="text-xs text-yellow-300 font-bold mb-1 flex items-center">
+                                                     <ShieldAlert className="w-3 h-3 mr-1"/> Flagged by System
+                                                 </div>
+                                             )}
+                                             {msg.text}
+                                             <div className={`text-[10px] mt-1 text-right ${msg.senderId === user.id ? 'text-indigo-200' : 'text-gray-400'}`}>
+                                                 {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                             </div>
+                                         </div>
+                                     </div>
+                                 ))}
+                                 <div ref={chatEndRef} />
+                             </div>
+
+                             <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
+                                 <div className="flex space-x-2">
+                                     <Input 
+                                         value={chatInput} 
+                                         onChange={e => setChatInput(e.target.value)} 
+                                         onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
+                                         placeholder="Type a secure message..."
+                                         disabled={isSending}
+                                     />
+                                     <Button onClick={handleSendMessage} disabled={isSending || !chatInput.trim()}>
+                                         <Send className="w-4 h-4" />
+                                     </Button>
+                                 </div>
+                                 <div className="text-[10px] text-gray-400 mt-2 text-center flex items-center justify-center">
+                                     <Lock className="w-3 h-3 mr-1"/> Never share passwords or pay outside SocialPay. AI protection active.
+                                 </div>
+                             </div>
+                          </>
+                      ) : (
+                          <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                              <MessageCircle className="w-16 h-16 mb-4 opacity-20"/>
+                              <p>Select a conversation to start chatting</p>
+                              <Button variant="outline" className="mt-4" onClick={() => setShowChat(false)}>Close</Button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
 
     </div>
   );

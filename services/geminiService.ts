@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 
 // Initialize lazily to prevent errors if process is undefined during module load
@@ -92,3 +93,55 @@ export const generateCampaignInsights = async (campaignTitle: string, platform: 
     return "Optimize your content title and thumbnail for better reach.";
   }
 }
+
+/**
+ * Analyzes chat messages for potential fraud, scams, or attempts to take payment off-platform.
+ */
+export const analyzeChatRisk = async (message: string): Promise<{ isRisky: boolean; reason: string }> => {
+  try {
+    const ai = getAI();
+    if (!ai) return { isRisky: false, reason: '' };
+
+    const prompt = `
+      You are a security bot for a freelance marketplace.
+      Analyze the following chat message for security risks.
+      
+      Look for:
+      1. Attempts to pay outside the platform (keywords: PayPal, CashApp, bank transfer, direct).
+      2. Attempts to communicate outside (keywords: WhatsApp, Telegram, email me at).
+      3. Scam patterns (e.g., asking for password, "trust me").
+      
+      Message: "${message}"
+      
+      Return JSON: { isRisky: boolean, reason: string }
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            isRisky: { type: Type.BOOLEAN },
+            reason: { type: Type.STRING }
+          },
+          required: ["isRisky", "reason"]
+        }
+      }
+    });
+
+    const result = JSON.parse(response.text || "{}");
+    return {
+      isRisky: result.isRisky ?? false,
+      reason: result.reason || "Suspicious content detected."
+    };
+
+  } catch (e) {
+    // Fail safe: simple regex for obvious keywords
+    const keywords = ['whatsapp', 'telegram', 'pay me direct', 'bank transfer'];
+    const isRisky = keywords.some(k => message.toLowerCase().includes(k));
+    return { isRisky, reason: isRisky ? 'Contains prohibited keywords' : '' };
+  }
+};
