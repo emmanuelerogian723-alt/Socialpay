@@ -5,10 +5,14 @@ import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, C
 // Helper to determine mode
 const USE_SUPABASE = isSupabaseConfigured();
 
-// --- INDEXED DB ADAPTER (Robust Fallback for Media) ---
-// This ensures that even if Supabase isn't connected, we can store 
-// large blobs (images/videos) locally in the browser so the user sees their data.
+// --- SECURITY HELPER: INPUT SANITIZATION ---
+// Prevents XSS attacks by stripping HTML tags from user input
+const sanitize = (str: string): string => {
+    if (typeof str !== 'string') return str;
+    return str.replace(/[<>]/g, ''); 
+};
 
+// --- INDEXED DB ADAPTER (Robust Fallback for Media) ---
 const DB_NAME = 'SocialPayDB';
 const DB_VERSION = 1;
 const STORE_MEDIA = 'media';
@@ -29,7 +33,6 @@ const openIDB = (): Promise<IDBDatabase> => {
 
 const saveMediaToIDB = async (blob: Blob): Promise<string> => {
     try {
-        // Read file first to prevent transaction auto-commit during async read
         const reader = new FileReader();
         const data = await new Promise<string | ArrayBuffer | null>((resolve, reject) => {
             reader.onloadend = () => resolve(reader.result);
@@ -45,11 +48,8 @@ const saveMediaToIDB = async (blob: Blob): Promise<string> => {
         
         return new Promise((resolve, reject) => {
             const req = tx.objectStore(STORE_MEDIA).put(data, id);
-            
-            // Handle transaction level errors/completion
             tx.oncomplete = () => { /* committed */ };
             tx.onerror = () => reject(tx.error);
-
             req.onsuccess = () => resolve(`idb:${id}`);
             req.onerror = () => reject(req.error);
         });
@@ -60,7 +60,7 @@ const saveMediaToIDB = async (blob: Blob): Promise<string> => {
 };
 
 export const loadMediaFromDB = async (key: string): Promise<string | null> => {
-  if (!key.startsWith('idb:')) return key; // Return as is if it's a normal URL
+  if (!key.startsWith('idb:')) return key;
   const realKey = key.split(':')[1];
   
   try {
@@ -76,7 +76,7 @@ export const loadMediaFromDB = async (key: string): Promise<string | null> => {
   }
 };
 
-// --- LOCAL MOCK HELPERS (Metadata) ---
+// --- LOCAL MOCK HELPERS ---
 const getLocal = <T>(key: string, def: T): T => {
   try {
     const item = localStorage.getItem(`socialpay_${key}`);
@@ -116,12 +116,13 @@ export const storageService = {
   
   // --- AUTH ---
   async signUp(email: string, password: string, name: string, role: string) {
+    const safeName = sanitize(name);
     if (USE_SUPABASE) {
-      const avatar = `https://ui-avatars.com/api/?name=${name.replace(' ', '+')}&background=random`;
+      const avatar = `https://ui-avatars.com/api/?name=${safeName.replace(' ', '+')}&background=random`;
       const { data, error } = await supabase.auth.signUp({
         email, password,
         options: { 
-            data: { name, role, avatar },
+            data: { name: safeName, role, avatar },
             emailRedirectTo: window.location.origin 
         }
       });
@@ -132,8 +133,8 @@ export const storageService = {
         if (users.find(u => u.email === email)) throw new Error("User exists");
         const newUser: User = {
             id: `user-${Date.now()}`,
-            email, name, role: role as any,
-            avatar: `https://ui-avatars.com/api/?name=${name.replace(' ', '+')}&background=random`,
+            email, name: safeName, role: role as any,
+            avatar: `https://ui-avatars.com/api/?name=${safeName.replace(' ', '+')}&background=random`,
             balance: 0, xp: 0, badges: [], verificationStatus: 'unpaid',
             joinedAt: Date.now(), followers: [], following: []
         };
@@ -179,41 +180,13 @@ export const storageService = {
       }
   },
 
-  // --- USERS & LOCATION ---
+  // --- USERS ---
   async getUserById(id: string): Promise<User | null> {
     if (USE_SUPABASE) {
       try {
         const { data, error } = await supabase.from('profiles').select('*').eq('id', id).single();
         if (data) {
-             return { 
-                ...data, 
-                verificationStatus: data.verification_status, 
-                joinedAt: data.joined_at,
-                badges: data.badges || [],
-                followers: data.followers || [],
-                following: data.following || [] 
-             } as User;
-        }
-        if (!data || error) {
-            // Auto-recovery for first login
-            const { data: authData } = await supabase.auth.getUser();
-            const user = authData?.user;
-            if (user && user.id === id) {
-                const metadata = user.user_metadata || {};
-                const newProfile = {
-                    id: user.id, email: user.email, name: metadata.name || 'User',
-                    avatar: metadata.avatar, role: metadata.role || 'engager',
-                    balance: 0, xp: 0, verification_status: 'unpaid', joined_at: Date.now(),
-                    badges: [], followers: [], following: []
-                };
-                await supabase.from('profiles').insert([newProfile]);
-                return { 
-                    ...newProfile, 
-                    verificationStatus: 'unpaid', 
-                    joinedAt: Date.now(),
-                    badges: [], followers: [], following: []
-                } as unknown as User;
-            }
+             return { ...data, verificationStatus: data.verification_status, joinedAt: data.joined_at, badges: data.badges || [], followers: data.followers || [], following: data.following || [] } as User;
         }
         return null;
       } catch { return null; }
@@ -223,17 +196,20 @@ export const storageService = {
   },
 
   async updateUser(user: Partial<User>) {
+    const safeName = user.name ? sanitize(user.name) : undefined;
+    const safeBio = user.bio ? sanitize(user.bio) : undefined;
+
     if (USE_SUPABASE) {
       await supabase.from('profiles').update({
-        name: user.name, avatar: user.avatar, balance: user.balance,
-        bio: user.bio, xp: user.xp, verification_status: user.verificationStatus,
+        name: safeName, avatar: user.avatar, balance: user.balance,
+        bio: safeBio, xp: user.xp, verification_status: user.verificationStatus,
         followers: user.followers
       }).eq('id', user.id);
     } else {
         const users = getLocal<User[]>('users', []);
         const idx = users.findIndex(u => u.id === user.id);
         if(idx !== -1) {
-            users[idx] = { ...users[idx], ...user };
+            users[idx] = { ...users[idx], ...user, name: safeName || users[idx].name, bio: safeBio || users[idx].bio };
             setLocal('users', users);
             setLocal('currentUser', users[idx]);
         }
@@ -250,7 +226,7 @@ export const storageService = {
         : getLocal<User[]>('users', []);
   },
 
-  // --- MEDIA STORAGE ---
+  // --- MEDIA ---
   async uploadMedia(file: Blob | File): Promise<string> {
     let fileToUpload = file;
     if (file instanceof File || file instanceof Blob) {
@@ -268,7 +244,6 @@ export const storageService = {
             const { data } = supabase.storage.from('socialpay-media').getPublicUrl(fileName);
             return data.publicUrl;
         } catch (error) {
-            console.warn("Cloud upload failed, falling back to local IndexedDB storage.", error);
             return await saveMediaToIDB(fileToUpload);
         }
     } else {
@@ -276,13 +251,11 @@ export const storageService = {
     }
   },
 
-  // --- CHAT & MESSAGING ---
+  // --- MESSAGING ---
   async getConversations(userId: string): Promise<Conversation[]> {
       if (USE_SUPABASE) {
           const { data } = await supabase.from('conversations').select('*').contains('participants', [userId]).order('last_message_time', { ascending: false });
-          return (data || []).map((c: any) => ({
-              ...c, participantNames: c.participant_names, lastMessage: c.last_message, lastMessageTime: c.last_message_time, relatedGigId: c.related_gig_id
-          }));
+          return (data || []).map((c: any) => ({ ...c, participantNames: c.participant_names, lastMessage: c.last_message, lastMessageTime: c.last_message_time, relatedGigId: c.related_gig_id }));
       } else {
           const all = getLocal<Conversation[]>('conversations', []);
           return all.filter(c => c.participants.includes(userId)).sort((a,b) => b.lastMessageTime - a.lastMessageTime);
@@ -290,10 +263,8 @@ export const storageService = {
   },
 
   async createConversation(participants: string[], names: Record<string, string>, gigId?: string): Promise<Conversation> {
-      // Check if exists
       const existing = await this.getConversations(participants[0]);
       const found = existing.find(c => participants.every(p => c.participants.includes(p)) && c.relatedGigId === gigId);
-      
       if (found) return found;
 
       const newConv: Conversation = {
@@ -306,14 +277,7 @@ export const storageService = {
       };
 
       if (USE_SUPABASE) {
-          await supabase.from('conversations').insert([{
-              id: newConv.id,
-              participants: newConv.participants,
-              participant_names: newConv.participantNames,
-              last_message: '',
-              last_message_time: newConv.lastMessageTime,
-              related_gig_id: gigId
-          }]);
+          await supabase.from('conversations').insert([{ id: newConv.id, participants: newConv.participants, participant_names: newConv.participantNames, last_message: '', last_message_time: newConv.lastMessageTime, related_gig_id: gigId }]);
       } else {
           const all = getLocal<Conversation[]>('conversations', []);
           all.unshift(newConv);
@@ -325,9 +289,7 @@ export const storageService = {
   async getMessages(conversationId: string): Promise<ChatMessage[]> {
       if (USE_SUPABASE) {
           const { data } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('timestamp', { ascending: true });
-          return (data || []).map((m: any) => ({
-              ...m, conversationId: m.conversation_id, senderId: m.sender_id, isFlagged: m.is_flagged
-          }));
+          return (data || []).map((m: any) => ({ ...m, conversationId: m.conversation_id, senderId: m.sender_id, isFlagged: m.is_flagged }));
       } else {
           const all = getLocal<ChatMessage[]>('messages', []);
           return all.filter(m => m.conversationId === conversationId).sort((a, b) => a.timestamp - b.timestamp);
@@ -335,53 +297,43 @@ export const storageService = {
   },
 
   async sendMessage(msg: ChatMessage) {
-      // Update Conversation Last Message
+      const safeText = sanitize(msg.text);
       if (USE_SUPABASE) {
-          await supabase.from('messages').insert([{
-              conversation_id: msg.conversationId, sender_id: msg.senderId, text: msg.text, timestamp: msg.timestamp, is_flagged: msg.isFlagged
-          }]);
-          await supabase.from('conversations').update({
-              last_message: msg.text,
-              last_message_time: msg.timestamp
-          }).eq('id', msg.conversationId);
+          await supabase.from('messages').insert([{ conversation_id: msg.conversationId, sender_id: msg.senderId, text: safeText, timestamp: msg.timestamp, is_flagged: msg.isFlagged }]);
+          await supabase.from('conversations').update({ last_message: safeText, last_message_time: msg.timestamp }).eq('id', msg.conversationId);
       } else {
           const msgs = getLocal<ChatMessage[]>('messages', []);
-          msgs.push(msg);
+          msgs.push({...msg, text: safeText});
           setLocal('messages', msgs);
-
           const convs = getLocal<Conversation[]>('conversations', []);
           const idx = convs.findIndex(c => c.id === msg.conversationId);
           if (idx !== -1) {
-              convs[idx].lastMessage = msg.text;
+              convs[idx].lastMessage = safeText;
               convs[idx].lastMessageTime = msg.timestamp;
               setLocal('conversations', convs);
           }
       }
   },
 
-  // --- GENERIC DATA OPERATIONS ---
+  // --- CORE DATA & TRANSACTIONS ---
   async getCampaigns(): Promise<Campaign[]> {
       if(USE_SUPABASE) {
           const { data } = await supabase.from('campaigns').select('*').order('created_at', {ascending: false});
-          return (data || []).map((c: any) => ({
-              ...c, creatorId: c.creator_id, creatorName: c.creator_name, rewardPerTask: c.reward_per_task, totalBudget: c.total_budget, remainingBudget: c.remaining_budget, completedCount: c.completed_count
-          }));
+          return (data || []).map((c: any) => ({ ...c, creatorId: c.creator_id, creatorName: c.creator_name, rewardPerTask: c.reward_per_task, totalBudget: c.total_budget, remainingBudget: c.remaining_budget, completedCount: c.completed_count }));
       }
       return getLocal('campaigns', []);
   },
   async createCampaign(c: Campaign) {
-      if(USE_SUPABASE) await supabase.from('campaigns').insert([{
-          creator_id: c.creatorId, creator_name: c.creatorName, platform: c.platform, type: c.type, title: c.title,
-          description: c.description, reward_per_task: c.rewardPerTask, total_budget: c.totalBudget, remaining_budget: c.remainingBudget, status: c.status, created_at: Date.now()
-      }]);
-      else { const l = getLocal<Campaign[]>('campaigns', []); l.unshift(c); setLocal('campaigns', l); }
+      const safeTitle = sanitize(c.title);
+      const safeDesc = sanitize(c.description);
+      if(USE_SUPABASE) await supabase.from('campaigns').insert([{ creator_id: c.creatorId, creator_name: c.creatorName, platform: c.platform, type: c.type, title: safeTitle, description: safeDesc, reward_per_task: c.rewardPerTask, total_budget: c.totalBudget, remaining_budget: c.remainingBudget, status: c.status, created_at: Date.now() }]);
+      else { const l = getLocal<Campaign[]>('campaigns', []); l.unshift({...c, title: safeTitle, description: safeDesc}); setLocal('campaigns', l); }
   },
   async deleteCampaign(id: string) {
       if(USE_SUPABASE) await supabase.from('campaigns').delete().eq('id', id);
       else { const l = getLocal<Campaign[]>('campaigns', []); setLocal('campaigns', l.filter(x=>x.id!==id)); }
   },
 
-  // Transactions
   async getTransactions(uid?: string): Promise<Transaction[]> {
       if(USE_SUPABASE) {
           let q = supabase.from('transactions').select('*').order('timestamp', {ascending: false});
@@ -393,9 +345,7 @@ export const storageService = {
       return uid ? l.filter(t => t.userId === uid) : l;
   },
   async createTransaction(tx: Transaction) {
-      if(USE_SUPABASE) await supabase.from('transactions').insert([{
-          user_id: tx.userId, user_name: tx.userName, amount: tx.amount, type: tx.type, status: tx.status, method: tx.method, details: tx.details, timestamp: Date.now(), related_gig_id: tx.relatedGigId
-      }]);
+      if(USE_SUPABASE) await supabase.from('transactions').insert([{ user_id: tx.userId, user_name: tx.userName, amount: tx.amount, type: tx.type, status: tx.status, method: tx.method, details: tx.details, timestamp: Date.now(), related_gig_id: tx.relatedGigId }]);
       else { const l = getLocal('transactions', []); if(!tx.id) tx.id=Date.now().toString(); l.unshift(tx); setLocal('transactions', l); }
   },
   async updateTransactionStatus(id: string, status: 'pending' | 'completed' | 'rejected') {
@@ -412,21 +362,11 @@ export const storageService = {
       if(user) {
           const newBalance = user.balance + amount;
           await this.updateUser({...user, balance: newBalance});
-          await this.createTransaction({
-              id: Date.now().toString(),
-              userId: user.id,
-              userName: user.name,
-              amount: Math.abs(amount),
-              type: amount >= 0 ? 'adjustment' : 'fee',
-              status: 'completed',
-              method: 'Admin',
-              details: reason,
-              timestamp: Date.now()
-          });
+          await this.createTransaction({ id: Date.now().toString(), userId: user.id, userName: user.name, amount: Math.abs(amount), type: amount >= 0 ? 'adjustment' : 'fee', status: 'completed', method: 'Admin', details: reason, timestamp: Date.now() });
       }
   },
 
-  // Videos
+  // --- CONTENT ---
   async getVideos(p=0, l=5): Promise<Video[]> {
       if(USE_SUPABASE) {
           const { data } = await supabase.from('videos').select('*').order('timestamp', {ascending: false}).range(p*l, (p*l)+l-1);
@@ -436,10 +376,9 @@ export const storageService = {
       return list.slice(p*l, (p*l)+l);
   },
   async addVideo(v: Video) {
-      if(USE_SUPABASE) await supabase.from('videos').insert([{
-          user_id: v.userId, user_name: v.userName, user_avatar: v.userAvatar, url: v.url, type: v.type, caption: v.caption, tags: v.tags, editing_data: v.editingData, timestamp: v.timestamp
-      }]);
-      else { const l = getLocal('videos', []); l.unshift(v); setLocal('videos', l); }
+      const safeCaption = sanitize(v.caption);
+      if(USE_SUPABASE) await supabase.from('videos').insert([{ user_id: v.userId, user_name: v.userName, user_avatar: v.userAvatar, url: v.url, type: v.type, caption: safeCaption, tags: v.tags, editing_data: v.editingData, timestamp: v.timestamp }]);
+      else { const l = getLocal('videos', []); l.unshift({...v, caption: safeCaption}); setLocal('videos', l); }
   },
   async incrementVideoView(id: string) {
       if(USE_SUPABASE) { const {data} = await supabase.from('videos').select('views').eq('id',id).single(); if(data) await supabase.from('videos').update({views: (data.views||0)+1}).eq('id',id); }
@@ -450,7 +389,7 @@ export const storageService = {
       else { const l = getLocal<Video[]>('videos', []); setLocal('videos', l.filter(x=>x.id!==id)); }
   },
 
-  // Gigs
+  // --- MARKETPLACE ENGINE ---
   async getGigs(): Promise<Gig[]> {
       if(USE_SUPABASE) {
           const { data } = await supabase.from('gigs').select('*').order('timestamp', {ascending: false});
@@ -459,21 +398,25 @@ export const storageService = {
       return getLocal('gigs', []);
   },
   async createGig(g: Gig) {
-      if(USE_SUPABASE) await supabase.from('gigs').insert([{ seller_id: g.sellerId, seller_name: g.sellerName, title: g.title, description: g.description, price: g.price, category: g.category, image: g.image, secret_delivery: g.secretDelivery, timestamp: Date.now() }]);
-      else { const l = getLocal('gigs', []); l.unshift(g); setLocal('gigs', l); }
+      const safeTitle = sanitize(g.title);
+      const safeDesc = sanitize(g.description);
+      if(USE_SUPABASE) await supabase.from('gigs').insert([{ seller_id: g.sellerId, seller_name: g.sellerName, title: safeTitle, description: safeDesc, price: g.price, category: g.category, image: g.image, secret_delivery: g.secretDelivery, timestamp: Date.now() }]);
+      else { const l = getLocal('gigs', []); l.unshift({...g, title: safeTitle, description: safeDesc}); setLocal('gigs', l); }
   },
   async deleteGig(id: string) {
       if(USE_SUPABASE) await supabase.from('gigs').delete().eq('id', id);
       else { const l = getLocal<Gig[]>('gigs', []); setLocal('gigs', l.filter(x=>x.id!==id)); }
   },
   
+  // SECURE TRANSACTION PROCESSOR: GIGS (70/30 SPLIT)
   async processGigOrder(transactionId: string): Promise<{success: boolean}> {
-      // Logic for releasing order funds
+      const FEE_PERCENTAGE = 0.30;
+      
       if(USE_SUPABASE) {
           const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single();
           if(!tx) return {success: false};
 
-          const sellerEarnings = tx.amount * 0.70;
+          const sellerEarnings = tx.amount * (1 - FEE_PERCENTAGE); 
           const { data: gig } = await supabase.from('gigs').select('seller_id').eq('id', tx.related_gig_id).single();
           if(!gig) return {success: false};
 
@@ -488,302 +431,305 @@ export const storageService = {
           }
           return {success: true};
       } else {
+          // Local logic
           const transactions = getLocal<Transaction[]>('transactions', []);
           const txIndex = transactions.findIndex(t => t.id === transactionId);
           if (txIndex === -1) return {success: false};
           
           const tx = transactions[txIndex];
-          const sellerEarnings = tx.amount * 0.70;
-
-          transactions[txIndex].status = 'completed';
-          setLocal('transactions', transactions);
+          if (tx.status === 'completed') return {success: false};
 
           const gigs = getLocal<Gig[]>('gigs', []);
           const gig = gigs.find(g => g.id === tx.relatedGigId);
           if (!gig) return {success: false};
 
+          const sellerEarnings = tx.amount * (1 - FEE_PERCENTAGE);
+          
+          transactions[txIndex].status = 'completed';
+          transactions[txIndex].details = `${tx.details} (Released)`;
+          
           const users = getLocal<User[]>('users', []);
-          const sellerIndex = users.findIndex(u => u.id === gig.sellerId);
-          if (sellerIndex !== -1) {
-              users[sellerIndex].balance += sellerEarnings;
-              setLocal('users', users);
+          const sellerIdx = users.findIndex(u => u.id === gig.sellerId);
+          if (sellerIdx !== -1) {
+              users[sellerIdx].balance += sellerEarnings;
               transactions.unshift({
-                  id: Date.now().toString(), userId: users[sellerIndex].id, userName: users[sellerIndex].name, amount: sellerEarnings, type: 'earning', status: 'completed', method: 'Gig Sale', details: `Sale: ${tx.details} (after 30% fee)`, timestamp: Date.now()
-              } as any);
-              setLocal('transactions', transactions);
+                  id: `earn_${Date.now()}`,
+                  userId: users[sellerIdx].id,
+                  userName: users[sellerIdx].name,
+                  amount: sellerEarnings,
+                  type: 'earning',
+                  status: 'completed',
+                  method: 'Gig Sale',
+                  details: `Sale of ${gig.title} (Net 70%)`,
+                  timestamp: Date.now()
+              });
+              setLocal('users', users);
           }
+          setLocal('transactions', transactions);
           return {success: true};
       }
   },
 
-  // Community
-  async getCommunityPosts(): Promise<CommunityPost[]> {
-      if(USE_SUPABASE) {
-          const { data } = await supabase.from('community_posts').select('*, post_comments(*)').order('timestamp', {ascending: false});
-          return (data || []).map((p: any) => ({
-              ...p, userId: p.user_id, userName: p.user_name, userAvatar: p.user_avatar, likedBy: p.liked_by||[],
-              commentsList: p.post_comments?.map((c:any) => ({...c, userId: c.user_id, userName: c.user_name, userAvatar: c.user_avatar})) || []
-          }));
-      }
-      return getLocal('community_posts', []);
-  },
-  async createCommunityPost(p: CommunityPost) {
-      if(USE_SUPABASE) await supabase.from('community_posts').insert([{ user_id: p.userId, user_name: p.userName, user_avatar: p.userAvatar, content: p.content, image: p.image, video: p.video, audio: p.audio, timestamp: Date.now() }]);
-      else { const l = getLocal('community_posts', []); l.unshift(p); setLocal('community_posts', l); }
-  },
-  async likeCommunityPost(pid: string, uid: string) {
-      if(USE_SUPABASE) {
-          const { data } = await supabase.from('community_posts').select('liked_by, likes').eq('id', pid).single();
-          if(data) {
-              let arr = data.liked_by || [];
-              let cnt = data.likes || 0;
-              if(arr.includes(uid)) { arr = arr.filter((x:string)=>x!==uid); cnt--; } else { arr.push(uid); cnt++; }
-              await supabase.from('community_posts').update({liked_by: arr, likes: cnt}).eq('id', pid);
-          }
-      } else {
-          const l = getLocal<CommunityPost[]>('community_posts', []);
-          const p = l.find(x=>x.id===pid);
-          if(p) { 
-              if(p.likedBy.includes(uid)) { p.likedBy = p.likedBy.filter(x=>x!==uid); p.likes--; } else { p.likedBy.push(uid); p.likes++; }
-              setLocal('community_posts', l); 
-          }
-      }
-  },
-  async commentOnCommunityPost(postId: string, comment: CommunityComment) {
-      if(USE_SUPABASE) {
-          await supabase.from('post_comments').insert([{
-              post_id: postId, user_id: comment.userId, user_name: comment.userName, user_avatar: comment.userAvatar, text: comment.text, timestamp: comment.timestamp
-          }]);
-          const { data } = await supabase.from('community_posts').select('comments').eq('id', postId).single();
-          if(data) await supabase.from('community_posts').update({comments: (data.comments||0)+1}).eq('id', postId);
-      } else {
-          const l = getLocal<CommunityPost[]>('community_posts', []);
-          const p = l.find(x=>x.id===postId);
-          if(p) {
-              if(!p.commentsList) p.commentsList = [];
-              p.commentsList.push(comment);
-              p.comments++;
-              setLocal('community_posts', l);
-          }
-      }
-  },
-
-  // Music
-  async getMusicTracks(): Promise<MusicTrack[]> {
-      if(USE_SUPABASE) {
-          const { data } = await supabase.from('music_tracks').select('*').order('created_at', {ascending: false});
-          return (data || []).map((t:any) => ({...t, artistId: t.artist_id, artistName: t.artist_name, coverUrl: t.cover_url, audioUrl: t.audio_url, createdAt: t.created_at}));
-      }
-      return getLocal('music_tracks', []);
-  },
-  async uploadMusicTrack(t: MusicTrack) {
-      if(USE_SUPABASE) await supabase.from('music_tracks').insert([{ artist_id: t.artistId, artist_name: t.artistName, title: t.title, cover_url: t.coverUrl, audio_url: t.audioUrl, genre: t.genre, price: t.price, created_at: t.createdAt }]);
-      else { const l = getLocal('music_tracks', []); l.unshift(t); setLocal('music_tracks', l); }
-  },
-  async recordMusicPlay(tid: string, aid: string, price: number) {
-      if(USE_SUPABASE) {
-          const { data } = await supabase.from('music_tracks').select('plays').eq('id', tid).single();
-          if(data) await supabase.from('music_tracks').update({plays: (data.plays||0)+1}).eq('id', tid);
-          // Pay artist
-          const artist = await this.getUserById(aid);
-          if(artist) await this.updateUser({...artist, balance: artist.balance + price});
-      } else {
-          const l = getLocal<MusicTrack[]>('music_tracks', []);
-          const t = l.find(x=>x.id===tid);
-          if(t) { t.plays++; setLocal('music_tracks', l); }
-          // Pay mock artist
-          const users = getLocal<User[]>('users', []);
-          const a = users.find(u=>u.id===aid);
-          if(a) { a.balance += price; setLocal('users', users); }
-      }
-  },
-  
-  // Games
-  async recordGameReward(userId: string, amount: number, gameName: string) {
-      const user = await this.getUserById(userId);
-      if(user) {
-          await this.updateUser({...user, balance: user.balance + amount, xp: user.xp + 50});
-          await this.createTransaction({
-              id: '', userId: user.id, userName: user.name, amount, type: 'earning', status: 'completed', method: 'System', details: `Game: ${gameName}`, timestamp: Date.now()
-          });
-      }
-  },
-
-  // Drafts
-  async getDrafts(uid: string): Promise<Draft[]> {
-      if(USE_SUPABASE) {
-          const {data} = await supabase.from('drafts').select('*').eq('user_id', uid);
-          return (data||[]).map((d:any)=>({id:d.id, userId:d.user_id, videoFile:d.video_file, type:d.type, caption:d.caption, tags:d.tags, editingData:d.editing_data, timestamp:d.timestamp}));
-      }
-      return getLocal<Draft[]>('drafts', []).filter(d => d.userId === uid);
-  },
-  async saveDraft(d: Draft) {
-      if(USE_SUPABASE) await supabase.from('drafts').insert([{user_id:d.userId, video_file:d.videoFile, type:d.type, caption:d.caption, tags:d.tags, editing_data:d.editingData, timestamp:d.timestamp}]);
-      else { const l = getLocal('drafts', []); l.push(d); setLocal('drafts', l); }
-  },
-  
-  // Follows
-  async toggleFollow(uid: string, targetId: string) {
-      if(USE_SUPABASE) {
-          const {data} = await supabase.from('profiles').select('followers').eq('id', targetId).single();
-          if(data) {
-              let arr = data.followers || [];
-              if(arr.includes(uid)) arr = arr.filter((x:string)=>x!==uid); else arr.push(uid);
-              await supabase.from('profiles').update({followers: arr}).eq('id', targetId);
-          }
-      } else {
-          const users = getLocal<User[]>('users', []);
-          const t = users.find(u=>u.id===targetId);
-          if(t) { if(t.followers.includes(uid)) t.followers=t.followers.filter(x=>x!==uid); else t.followers.push(uid); setLocal('users', users); }
-      }
-  },
-  
-  // Notifications
-  async getNotifications(uid: string): Promise<Notification[]> {
-      if(USE_SUPABASE) {
-          const {data} = await supabase.from('notifications').select('*').or(`user_id.eq.${uid},user_id.eq.all`).order('timestamp', {ascending: false});
-          return (data||[]).map((n:any)=>({id:n.id, userId:n.user_id, title:n.title, message:n.message, type:n.type, read:n.read, timestamp:n.timestamp}));
-      }
-      return getLocal<Notification[]>('notifications', []).filter(n => n.userId === uid || n.userId === 'all').sort((a,b) => b.timestamp - a.timestamp);
-  },
-  async createNotification(n: Notification) {
-      if(USE_SUPABASE) await supabase.from('notifications').insert([{user_id:n.userId, title:n.title, message:n.message, type:n.type, read:n.read, timestamp:n.timestamp}]);
-      else { const l = getLocal('notifications', []); l.push(n); setLocal('notifications', l); }
-  },
-  async markNotificationRead(id: string) {
-      if(USE_SUPABASE) {
-          await supabase.from('notifications').update({ read: true }).eq('id', id);
-      } else {
-          const l = getLocal<Notification[]>('notifications', []);
-          const n = l.find(x => x.id === id);
-          if (n) { n.read = true; setLocal('notifications', l); }
-      }
-  },
-  async markAllNotificationsRead(userId: string) {
-      if(USE_SUPABASE) {
-          await supabase.from('notifications').update({ read: true }).eq('user_id', userId);
-      } else {
-          const l = getLocal<Notification[]>('notifications', []);
-          l.forEach(n => { if(n.userId === userId) n.read = true; });
-          setLocal('notifications', l);
-      }
-  },
-  async broadcastMessage(msg: string) {
-      await this.createNotification({id:Date.now().toString(), userId:'all', title:'Admin Broadcast', message:msg, type:'info', read:false, timestamp:Date.now()});
-  },
-
-  // --- DIGITAL MARKET (STORES & PRODUCTS) ---
-  async getStoreByOwner(userId: string): Promise<Storefront | null> {
+  // SECURE TRANSACTION PROCESSOR: DIGITAL PRODUCTS (70/30 SPLIT)
+  async recordDigitalSale(productId: string, amount: number, sellerId: string) {
+      const FEE_PERCENTAGE = 0.30;
+      const sellerEarnings = amount * (1 - FEE_PERCENTAGE);
+      
       if (USE_SUPABASE) {
-          const { data } = await supabase.from('storefronts').select('*').eq('owner_id', userId).single();
-          if (data) {
-              return {
-                  id: data.id, ownerId: data.owner_id, storeName: data.store_name, description: data.description,
-                  bannerUrl: data.banner_url, logoUrl: data.logo_url, accentColor: data.accent_color,
-                  createdAt: data.created_at, totalSales: data.total_sales, rating: data.rating
-              };
+          const { data: seller } = await supabase.from('profiles').select('*').eq('id', sellerId).single();
+          if (seller) {
+              await supabase.from('profiles').update({ balance: seller.balance + sellerEarnings }).eq('id', sellerId);
+              await supabase.from('transactions').insert([{
+                  user_id: sellerId,
+                  user_name: seller.name,
+                  amount: sellerEarnings,
+                  type: 'earning',
+                  status: 'completed',
+                  method: 'Digital Sale',
+                  details: `Digital Product Sale (Net 70%)`,
+                  timestamp: Date.now()
+              }]);
+              
+              const { data: prod } = await supabase.from('digital_products').select('sales').eq('id', productId).single();
+              if(prod) await supabase.from('digital_products').update({ sales: (prod.sales || 0) + 1 }).eq('id', productId);
+              
+              const { data: store } = await supabase.from('storefronts').select('total_sales').eq('owner_id', sellerId).single();
+              if(store) await supabase.from('storefronts').update({ total_sales: (store.total_sales || 0) + 1 }).eq('owner_id', sellerId);
           }
+      } else {
+          const users = getLocal<User[]>('users', []);
+          const sellerIdx = users.findIndex(u => u.id === sellerId);
+          if (sellerIdx !== -1) {
+              users[sellerIdx].balance += sellerEarnings;
+              setLocal('users', users);
+              
+              const transactions = getLocal<Transaction[]>('transactions', []);
+              transactions.unshift({
+                  id: `sale_${Date.now()}`,
+                  userId: sellerId,
+                  userName: users[sellerIdx].name,
+                  amount: sellerEarnings,
+                  type: 'earning',
+                  status: 'completed',
+                  method: 'Digital Sale',
+                  details: `Digital Product Sale (Net 70%)`,
+                  timestamp: Date.now()
+              });
+              setLocal('transactions', transactions);
+          }
+          
+          const products = getLocal<DigitalProduct[]>('digital_products', []);
+          const pIdx = products.findIndex(p => p.id === productId);
+          if(pIdx !== -1) {
+              products[pIdx].sales++;
+              setLocal('digital_products', products);
+          }
+          
+          const stores = getLocal<Storefront[]>('stores', []);
+          const sIdx = stores.findIndex(s => s.ownerId === sellerId);
+          if(sIdx !== -1) {
+              stores[sIdx].totalSales++;
+              setLocal('stores', stores);
+          }
+      }
+  },
+
+  // --- DIGITAL STORES ---
+  async getStoreByOwner(ownerId: string): Promise<Storefront | null> {
+      if(USE_SUPABASE) {
+          const { data } = await supabase.from('storefronts').select('*').eq('owner_id', ownerId).single();
+          if(data) return { ...data, ownerId: data.owner_id, storeName: data.store_name, bannerUrl: data.banner_url, logoUrl: data.logo_url, accentColor: data.accent_color, socialLinks: data.social_links, totalSales: data.total_sales, createdAt: data.created_at };
           return null;
       }
-      return getLocal<Storefront[]>('storefronts', []).find(s => s.ownerId === userId) || null;
+      return getLocal<Storefront[]>('stores', []).find(s => s.ownerId === ownerId) || null;
+  },
+  async createStore(s: Storefront) {
+      const safeName = sanitize(s.storeName);
+      const safeDesc = sanitize(s.description);
+      if(USE_SUPABASE) await supabase.from('storefronts').insert([{ id: s.id, owner_id: s.ownerId, store_name: safeName, description: safeDesc, banner_url: s.bannerUrl, logo_url: s.logoUrl, accent_color: s.accentColor, theme: s.theme, social_links: s.socialLinks, created_at: s.createdAt, total_sales: 0, rating: 5 }]);
+      else { const l = getLocal('stores', []); l.push({...s, storeName: safeName, description: safeDesc}); setLocal('stores', l); }
+  },
+  async updateStore(s: Storefront) {
+      const safeName = sanitize(s.storeName);
+      const safeDesc = sanitize(s.description);
+      if(USE_SUPABASE) await supabase.from('storefronts').update({ store_name: safeName, description: safeDesc, banner_url: s.bannerUrl, logo_url: s.logoUrl, accent_color: s.accentColor, theme: s.theme, social_links: s.socialLinks }).eq('id', s.id);
+      else { const l = getLocal<Storefront[]>('stores', []); const i = l.findIndex(x=>x.id===s.id); if(i!==-1) { l[i] = {...s, storeName: safeName, description: safeDesc}; setLocal('stores', l); } }
   },
   async getAllStores(): Promise<Storefront[]> {
       if(USE_SUPABASE) {
-          const { data } = await supabase.from('storefronts').select('*').order('created_at', {ascending: false});
-          return (data || []).map((s:any) => ({
-              id: s.id, ownerId: s.owner_id, storeName: s.store_name, description: s.description,
-              bannerUrl: s.banner_url, logoUrl: s.logo_url, accentColor: s.accent_color,
-              createdAt: s.created_at, totalSales: s.total_sales, rating: s.rating
-          }));
+          const { data } = await supabase.from('storefronts').select('*');
+          return (data || []).map((d: any) => ({...d, ownerId: d.owner_id, storeName: d.store_name, bannerUrl: d.banner_url, logoUrl: d.logo_url, accentColor: d.accent_color, socialLinks: d.social_links, totalSales: d.total_sales}));
       }
-      return getLocal<Storefront[]>('storefronts', []);
-  },
-  async createStore(s: Storefront) {
-      if (USE_SUPABASE) await supabase.from('storefronts').insert([{
-          id: s.id, owner_id: s.ownerId, store_name: s.storeName, description: s.description,
-          banner_url: s.bannerUrl, logo_url: s.logoUrl, accent_color: s.accentColor, created_at: s.createdAt,
-          total_sales: 0, rating: 5
-      }]);
-      else { const l = getLocal('storefronts', []); l.push(s); setLocal('storefronts', l); }
+      return getLocal('stores', []);
   },
   async deleteStore(id: string) {
-      if (USE_SUPABASE) await supabase.from('storefronts').delete().eq('id', id);
-      else { const l = getLocal<Storefront[]>('storefronts', []); setLocal('storefronts', l.filter(x => x.id !== id)); }
-  },
-  async updateStore(s: Storefront) {
-      if (USE_SUPABASE) await supabase.from('storefronts').update({
-          store_name: s.storeName, description: s.description, banner_url: s.bannerUrl, 
-          logo_url: s.logoUrl, accent_color: s.accentColor
-      }).eq('id', s.id);
-      else { 
-          const l = getLocal<Storefront[]>('storefronts', []); 
-          const idx = l.findIndex(x => x.id === s.id); 
-          if(idx!==-1) { l[idx]=s; setLocal('storefronts', l); }
+      if(USE_SUPABASE) {
+          await supabase.from('digital_products').delete().eq('store_id', id);
+          await supabase.from('storefronts').delete().eq('id', id);
+      } else {
+          setLocal('stores', getLocal<Storefront[]>('stores', []).filter(s => s.id !== id));
+          setLocal('digital_products', getLocal<DigitalProduct[]>('digital_products', []).filter(p => p.storeId !== id));
       }
   },
-  async getDigitalProducts(storeId?: string): Promise<DigitalProduct[]> {
-      if (USE_SUPABASE) {
-          let q = supabase.from('digital_products').select('*');
-          if(storeId) q = q.eq('store_id', storeId);
-          const { data } = await q.order('created_at', {ascending: false});
-          return (data || []).map((p: any) => ({
-              id: p.id, storeId: p.store_id, ownerId: p.owner_id, title: p.title, description: p.description,
-              price: p.price, category: p.category, subCategory: p.sub_category, thumbnailUrl: p.thumbnail_url,
-              fileUrl: p.file_url, fileType: p.file_type, previewImages: p.preview_images, createdAt: p.created_at, sales: p.sales
-          }));
+
+  // --- DIGITAL PRODUCTS ---
+  async getDigitalProducts(): Promise<DigitalProduct[]> {
+      if(USE_SUPABASE) {
+          const { data } = await supabase.from('digital_products').select('*');
+          return (data || []).map((p: any) => ({ ...p, storeId: p.store_id, ownerId: p.owner_id, subCategory: p.sub_category, thumbnailUrl: p.thumbnail_url, fileUrl: p.file_url, fileType: p.file_type }));
       }
-      const l = getLocal<DigitalProduct[]>('digital_products', []);
-      return storeId ? l.filter(p => p.storeId === storeId) : l;
+      return getLocal('digital_products', []);
   },
   async createDigitalProduct(p: DigitalProduct) {
-      if(USE_SUPABASE) await supabase.from('digital_products').insert([{
-          id: p.id, store_id: p.storeId, owner_id: p.ownerId, title: p.title, description: p.description,
-          price: p.price, category: p.category, sub_category: p.subCategory, thumbnail_url: p.thumbnailUrl,
-          file_url: p.fileUrl, file_type: p.fileType, preview_images: p.previewImages, created_at: p.createdAt, sales: 0
-      }]);
-      else { const l = getLocal('digital_products', []); l.unshift(p); setLocal('digital_products', l); }
+      const safeTitle = sanitize(p.title);
+      const safeDesc = sanitize(p.description);
+      if(USE_SUPABASE) await supabase.from('digital_products').insert([{ id: p.id, store_id: p.storeId, owner_id: p.ownerId, title: safeTitle, description: safeDesc, price: p.price, category: p.category, sub_category: p.subCategory, thumbnail_url: p.thumbnailUrl, file_url: p.fileUrl, file_type: p.fileType, created_at: p.createdAt, sales: 0 }]);
+      else { const l = getLocal('digital_products', []); l.push({...p, title: safeTitle, description: safeDesc}); setLocal('digital_products', l); }
   },
   async updateDigitalProduct(p: DigitalProduct) {
-      if(USE_SUPABASE) await supabase.from('digital_products').update({
-          title: p.title, description: p.description, price: p.price, category: p.category, 
-          sub_category: p.subCategory, thumbnail_url: p.thumbnailUrl, file_url: p.fileUrl, file_type: p.fileType
-      }).eq('id', p.id);
-      else {
-          const l = getLocal<DigitalProduct[]>('digital_products', []);
-          const idx = l.findIndex(x=>x.id===p.id);
-          if(idx!==-1) { l[idx]=p; setLocal('digital_products', l); }
-      }
+      const safeTitle = sanitize(p.title);
+      const safeDesc = sanitize(p.description);
+      if(USE_SUPABASE) await supabase.from('digital_products').update({ title: safeTitle, description: safeDesc, price: p.price, category: p.category, sub_category: p.subCategory, thumbnail_url: p.thumbnailUrl, file_url: p.fileUrl, file_type: p.fileType }).eq('id', p.id);
+      else { const l = getLocal<DigitalProduct[]>('digital_products', []); const i = l.findIndex(x=>x.id===p.id); if(i!==-1) { l[i] = {...p, title: safeTitle, description: safeDesc}; setLocal('digital_products', l); } }
   },
   async deleteDigitalProduct(id: string) {
       if(USE_SUPABASE) await supabase.from('digital_products').delete().eq('id', id);
       else { const l = getLocal<DigitalProduct[]>('digital_products', []); setLocal('digital_products', l.filter(x=>x.id!==id)); }
   },
-  async recordDigitalSale(productId: string, price: number, sellerId: string) {
-      // 1. Increment Sales
-      // 2. Pay Seller (85% to seller, 15% platform fee for digital goods)
-      const sellerEarnings = price * 0.85;
-      
+
+  // --- OTHERS ---
+  async getNotifications(uid: string): Promise<Notification[]> {
       if(USE_SUPABASE) {
-          const { data } = await supabase.from('digital_products').select('sales').eq('id', productId).single();
-          if(data) await supabase.from('digital_products').update({sales: (data.sales||0)+1}).eq('id', productId);
-          
-          const { data: seller } = await supabase.from('profiles').select('*').eq('id', sellerId).single();
-          if(seller) {
-              await supabase.from('profiles').update({balance: seller.balance + sellerEarnings}).eq('id', sellerId);
-              await supabase.from('storefronts').update({total_sales: (await supabase.from('storefronts').select('total_sales').eq('owner_id', sellerId).single()).data?.total_sales + 1}).eq('owner_id', sellerId);
+          const { data } = await supabase.from('notifications').select('*').eq('user_id', uid).order('timestamp', {ascending: false});
+          return (data || []).map((n: any) => ({...n, userId: n.user_id}));
+      }
+      return getLocal<Notification[]>('notifications', []).filter(n => n.userId === uid);
+  },
+  async createNotification(n: Notification) {
+      if(USE_SUPABASE) await supabase.from('notifications').insert([{ user_id: n.userId, title: n.title, message: n.message, type: n.type, read: n.read, timestamp: n.timestamp }]);
+      else { const l = getLocal('notifications', []); if(!n.id) n.id=Date.now().toString(); l.unshift(n); setLocal('notifications', l); }
+  },
+  async markNotificationRead(id: string) {
+      if(USE_SUPABASE) await supabase.from('notifications').update({ read: true }).eq('id', id);
+      else { const l = getLocal<Notification[]>('notifications', []); const n = l.find(x=>x.id===id); if(n) { n.read=true; setLocal('notifications', l); } }
+  },
+  async markAllNotificationsRead(userId: string) {
+      if(USE_SUPABASE) await supabase.from('notifications').update({ read: true }).eq('user_id', userId);
+      else { const l = getLocal<Notification[]>('notifications', []); l.forEach(n => { if(n.userId === userId) n.read = true; }); setLocal('notifications', l); }
+  },
+  async getCommunityPosts(): Promise<CommunityPost[]> {
+      if(USE_SUPABASE) {
+          const { data } = await supabase.from('community_posts').select('*').order('timestamp', {ascending: false});
+          return (data || []).map((p: any) => ({...p, userId: p.user_id, userName: p.user_name, userAvatar: p.user_avatar, likedBy: p.liked_by || [], commentsList: p.comments_list || []}));
+      }
+      return getLocal('community_posts', []);
+  },
+  async createCommunityPost(p: CommunityPost) {
+      const safeContent = sanitize(p.content);
+      if(USE_SUPABASE) await supabase.from('community_posts').insert([{ id: p.id, user_id: p.userId, user_name: p.userName, user_avatar: p.userAvatar, content: safeContent, image: p.image, video: p.video, audio: p.audio, likes: 0, comments: 0, comments_list: [], timestamp: p.timestamp, liked_by: [] }]);
+      else { const l = getLocal('community_posts', []); l.unshift({...p, content: safeContent}); setLocal('community_posts', l); }
+  },
+  async likeCommunityPost(postId: string, userId: string) {
+      if(USE_SUPABASE) {
+          const { data } = await supabase.from('community_posts').select('likes, liked_by').eq('id', postId).single();
+          if(data) {
+              const liked = (data.liked_by || []).includes(userId);
+              const newLikedBy = liked ? data.liked_by.filter((id: string) => id !== userId) : [...(data.liked_by || []), userId];
+              await supabase.from('community_posts').update({ likes: newLikedBy.length, liked_by: newLikedBy }).eq('id', postId);
           }
       } else {
-          const l = getLocal<DigitalProduct[]>('digital_products', []);
-          const p = l.find(x=>x.id===productId);
-          if(p) { p.sales++; setLocal('digital_products', l); }
-          
-          const users = getLocal<User[]>('users', []);
-          const u = users.find(x=>x.id===sellerId);
-          if(u) { u.balance += sellerEarnings; setLocal('users', users); }
-          
-          const stores = getLocal<Storefront[]>('storefronts', []);
-          const s = stores.find(x=>x.ownerId===sellerId);
-          if(s) { s.totalSales++; setLocal('storefronts', stores); }
+          const l = getLocal<CommunityPost[]>('community_posts', []);
+          const p = l.find(x => x.id === postId);
+          if(p) {
+              if (p.likedBy.includes(userId)) { p.likedBy = p.likedBy.filter(id => id !== userId); p.likes--; }
+              else { p.likedBy.push(userId); p.likes++; }
+              setLocal('community_posts', l);
+          }
+      }
+  },
+  async commentOnCommunityPost(postId: string, comment: CommunityComment) {
+      const safeText = sanitize(comment.text);
+      if(USE_SUPABASE) {
+          const { data } = await supabase.from('community_posts').select('comments, comments_list').eq('id', postId).single();
+          if(data) {
+              const newList = [...(data.comments_list || []), {...comment, text: safeText}];
+              await supabase.from('community_posts').update({ comments: newList.length, comments_list: newList }).eq('id', postId);
+          }
+      } else {
+          const l = getLocal<CommunityPost[]>('community_posts', []);
+          const p = l.find(x => x.id === postId);
+          if(p) {
+              if(!p.commentsList) p.commentsList = [];
+              p.commentsList.push({...comment, text: safeText});
+              p.comments++;
+              setLocal('community_posts', l);
+          }
+      }
+  },
+  async getDrafts(uid: string): Promise<Draft[]> {
+      const l = getLocal<Draft[]>('drafts', []);
+      return l.filter(d => d.userId === uid);
+  },
+  async saveDraft(d: Draft) {
+      const l = getLocal<Draft[]>('drafts', []);
+      l.unshift(d);
+      setLocal('drafts', l);
+  },
+  async toggleFollow(userId: string, targetId: string) {
+      if(userId === targetId) return;
+      const user = await this.getUserById(userId);
+      const target = await this.getUserById(targetId);
+      if(user && target) {
+          const isFollowing = user.following.includes(targetId);
+          if(isFollowing) {
+              user.following = user.following.filter(id => id !== targetId);
+              target.followers = target.followers.filter(id => id !== userId);
+          } else {
+              user.following.push(targetId);
+              target.followers.push(userId);
+          }
+          await this.updateUser(user);
+          await this.updateUser(target);
+      }
+  },
+  async getMusicTracks(): Promise<MusicTrack[]> {
+      const l = getLocal<MusicTrack[]>('music_tracks', []);
+      return l;
+  },
+  async uploadMusicTrack(t: MusicTrack) {
+      const safeTitle = sanitize(t.title);
+      const l = getLocal<MusicTrack[]>('music_tracks', []);
+      l.unshift({...t, title: safeTitle});
+      setLocal('music_tracks', l);
+  },
+  async recordMusicPlay(trackId: string, artistId: string, price: number) {
+      const l = getLocal<MusicTrack[]>('music_tracks', []);
+      const t = l.find(x => x.id === trackId);
+      if(t) { t.plays++; setLocal('music_tracks', l); }
+      // Pay Artist (Micro-transaction)
+      const users = getLocal<User[]>('users', []);
+      const artist = users.find(u => u.id === artistId);
+      if(artist) {
+          artist.balance += price;
+          setLocal('users', users);
+      }
+  },
+  async recordGameReward(userId: string, amount: number, game: string) {
+      if(amount <= 0) return;
+      await this.createTransaction({
+          id: `game_${Date.now()}`,
+          userId, userName: 'System', amount, type: 'earning', status: 'completed', method: 'Game Reward', details: `Won in ${game}`, timestamp: Date.now()
+      });
+  },
+  async broadcastMessage(msg: string) {
+      // In a real app this would use WS, here we create notifications for all
+      const users = await this.getUsers();
+      const safeMsg = sanitize(msg);
+      for(const u of users) {
+          await this.createNotification({
+              id: Date.now().toString() + Math.random(),
+              userId: u.id, title: 'System Alert', message: safeMsg, type: 'info', read: false, timestamp: Date.now()
+          });
       }
   }
 };

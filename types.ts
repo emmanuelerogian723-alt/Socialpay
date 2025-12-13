@@ -212,6 +212,8 @@ export interface Storefront {
   bannerUrl: string;
   logoUrl: string;
   accentColor: string;
+  theme?: 'modern' | 'cyber' | 'boutique';
+  socialLinks?: { instagram?: string; twitter?: string; website?: string };
   createdAt: number;
   totalSales: number;
   rating: number;

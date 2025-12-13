@@ -377,6 +377,24 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                  </div>
              </div>
 
+             {/* PROFIT CALCULATOR */}
+             {newGig.price && newGig.price > 0 && (
+                <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg border border-indigo-100 dark:border-indigo-800 animate-fade-in">
+                    <div className="flex justify-between items-center text-sm mb-1">
+                        <span className="text-gray-500">Listing Price:</span>
+                        <span className="font-bold">${Number(newGig.price).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm mb-2 text-red-500">
+                        <span>Platform Fee (30%):</span>
+                        <span>-${(Number(newGig.price) * 0.30).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center pt-2 border-t border-indigo-200 dark:border-indigo-700">
+                        <span className="font-bold text-indigo-700 dark:text-indigo-300">Your Net Earnings:</span>
+                        <span className="font-black text-green-600 text-lg">${(Number(newGig.price) * 0.70).toFixed(2)}</span>
+                    </div>
+                </div>
+             )}
+
              <div>
                <label className="block text-sm font-medium mb-1">Description</label>
                <textarea 
@@ -482,7 +500,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                               <Badge color={s.status === 'completed' ? 'green' : 'yellow'} className="mt-1">{s.status === 'completed' ? 'Completed' : 'Action Required'}</Badge>
                           </div>
                           <div className="text-right">
-                              <div className="font-bold text-green-600 mb-2">+${s.amount}</div>
+                              <div className="font-bold text-green-600 mb-2">+${(s.amount * 0.70).toFixed(2)}</div>
                               {s.status === 'pending_delivery' && (
                                   <Button size="sm" onClick={() => handleReleaseOrder(s.id)}>Release Item</Button>
                               )}
