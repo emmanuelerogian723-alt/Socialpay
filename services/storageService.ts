@@ -1,7 +1,7 @@
 
 
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage, MusicTrack, Conversation } from '../types';
+import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage, MusicTrack, Conversation, Storefront, DigitalProduct } from '../types';
 
 // Helper to determine mode
 const USE_SUPABASE = isSupabaseConfigured();
@@ -645,13 +645,116 @@ export const storageService = {
           const {data} = await supabase.from('notifications').select('*').or(`user_id.eq.${uid},user_id.eq.all`).order('timestamp', {ascending: false});
           return (data||[]).map((n:any)=>({id:n.id, userId:n.user_id, title:n.title, message:n.message, type:n.type, read:n.read, timestamp:n.timestamp}));
       }
-      return getLocal<Notification[]>('notifications', []).filter(n => n.userId === uid || n.userId === 'all');
+      return getLocal<Notification[]>('notifications', []).filter(n => n.userId === uid || n.userId === 'all').sort((a,b) => b.timestamp - a.timestamp);
   },
   async createNotification(n: Notification) {
       if(USE_SUPABASE) await supabase.from('notifications').insert([{user_id:n.userId, title:n.title, message:n.message, type:n.type, read:n.read, timestamp:n.timestamp}]);
       else { const l = getLocal('notifications', []); l.push(n); setLocal('notifications', l); }
   },
+  async markNotificationRead(id: string) {
+      if(USE_SUPABASE) {
+          await supabase.from('notifications').update({ read: true }).eq('id', id);
+      } else {
+          const l = getLocal<Notification[]>('notifications', []);
+          const n = l.find(x => x.id === id);
+          if (n) { n.read = true; setLocal('notifications', l); }
+      }
+  },
+  async markAllNotificationsRead(userId: string) {
+      if(USE_SUPABASE) {
+          await supabase.from('notifications').update({ read: true }).eq('user_id', userId);
+      } else {
+          const l = getLocal<Notification[]>('notifications', []);
+          l.forEach(n => { if(n.userId === userId) n.read = true; });
+          setLocal('notifications', l);
+      }
+  },
   async broadcastMessage(msg: string) {
       await this.createNotification({id:Date.now().toString(), userId:'all', title:'Admin Broadcast', message:msg, type:'info', read:false, timestamp:Date.now()});
+  },
+
+  // --- DIGITAL MARKET (STORES & PRODUCTS) ---
+  async getStoreByOwner(userId: string): Promise<Storefront | null> {
+      if (USE_SUPABASE) {
+          const { data } = await supabase.from('storefronts').select('*').eq('owner_id', userId).single();
+          if (data) {
+              return {
+                  id: data.id, ownerId: data.owner_id, storeName: data.store_name, description: data.description,
+                  bannerUrl: data.banner_url, logoUrl: data.logo_url, accentColor: data.accent_color,
+                  createdAt: data.created_at, totalSales: data.total_sales, rating: data.rating
+              };
+          }
+          return null;
+      }
+      return getLocal<Storefront[]>('storefronts', []).find(s => s.ownerId === userId) || null;
+  },
+  async createStore(s: Storefront) {
+      if (USE_SUPABASE) await supabase.from('storefronts').insert([{
+          id: s.id, owner_id: s.ownerId, store_name: s.storeName, description: s.description,
+          banner_url: s.bannerUrl, logo_url: s.logoUrl, accent_color: s.accentColor, created_at: s.createdAt,
+          total_sales: 0, rating: 5
+      }]);
+      else { const l = getLocal('storefronts', []); l.push(s); setLocal('storefronts', l); }
+  },
+  async updateStore(s: Storefront) {
+      if (USE_SUPABASE) await supabase.from('storefronts').update({
+          store_name: s.storeName, description: s.description, banner_url: s.bannerUrl, 
+          logo_url: s.logoUrl, accent_color: s.accentColor
+      }).eq('id', s.id);
+      else { 
+          const l = getLocal<Storefront[]>('storefronts', []); 
+          const idx = l.findIndex(x => x.id === s.id); 
+          if(idx!==-1) { l[idx]=s; setLocal('storefronts', l); }
+      }
+  },
+  async getDigitalProducts(storeId?: string): Promise<DigitalProduct[]> {
+      if (USE_SUPABASE) {
+          let q = supabase.from('digital_products').select('*');
+          if(storeId) q = q.eq('store_id', storeId);
+          const { data } = await q.order('created_at', {ascending: false});
+          return (data || []).map((p: any) => ({
+              id: p.id, storeId: p.store_id, ownerId: p.owner_id, title: p.title, description: p.description,
+              price: p.price, category: p.category, subCategory: p.sub_category, thumbnailUrl: p.thumbnail_url,
+              fileUrl: p.file_url, fileType: p.file_type, previewImages: p.preview_images, createdAt: p.created_at, sales: p.sales
+          }));
+      }
+      const l = getLocal<DigitalProduct[]>('digital_products', []);
+      return storeId ? l.filter(p => p.storeId === storeId) : l;
+  },
+  async createDigitalProduct(p: DigitalProduct) {
+      if(USE_SUPABASE) await supabase.from('digital_products').insert([{
+          id: p.id, store_id: p.storeId, owner_id: p.ownerId, title: p.title, description: p.description,
+          price: p.price, category: p.category, sub_category: p.subCategory, thumbnail_url: p.thumbnailUrl,
+          file_url: p.fileUrl, file_type: p.fileType, preview_images: p.previewImages, created_at: p.createdAt, sales: 0
+      }]);
+      else { const l = getLocal('digital_products', []); l.unshift(p); setLocal('digital_products', l); }
+  },
+  async recordDigitalSale(productId: string, price: number, sellerId: string) {
+      // 1. Increment Sales
+      // 2. Pay Seller (85% to seller, 15% platform fee for digital goods)
+      const sellerEarnings = price * 0.85;
+      
+      if(USE_SUPABASE) {
+          const { data } = await supabase.from('digital_products').select('sales').eq('id', productId).single();
+          if(data) await supabase.from('digital_products').update({sales: (data.sales||0)+1}).eq('id', productId);
+          
+          const { data: seller } = await supabase.from('profiles').select('*').eq('id', sellerId).single();
+          if(seller) {
+              await supabase.from('profiles').update({balance: seller.balance + sellerEarnings}).eq('id', sellerId);
+              await supabase.from('storefronts').update({total_sales: (await supabase.from('storefronts').select('total_sales').eq('owner_id', sellerId).single()).data?.total_sales + 1}).eq('owner_id', sellerId);
+          }
+      } else {
+          const l = getLocal<DigitalProduct[]>('digital_products', []);
+          const p = l.find(x=>x.id===productId);
+          if(p) { p.sales++; setLocal('digital_products', l); }
+          
+          const users = getLocal<User[]>('users', []);
+          const u = users.find(x=>x.id===sellerId);
+          if(u) { u.balance += sellerEarnings; setLocal('users', users); }
+          
+          const stores = getLocal<Storefront[]>('storefronts', []);
+          const s = stores.find(x=>x.ownerId===sellerId);
+          if(s) { s.totalSales++; setLocal('storefronts', stores); }
+      }
   }
 };

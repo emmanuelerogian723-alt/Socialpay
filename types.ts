@@ -1,5 +1,7 @@
 
 
+
+
 export type Role = 'creator' | 'engager' | 'admin';
 
 export type Platform = 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'linkedin';
@@ -59,7 +61,7 @@ export interface Transaction {
   userId: string;
   userName: string;
   amount: number;
-  type: 'earning' | 'withdrawal' | 'deposit' | 'fee' | 'adjustment' | 'purchase' | 'gig_sale';
+  type: 'earning' | 'withdrawal' | 'deposit' | 'fee' | 'adjustment' | 'purchase' | 'gig_sale' | 'digital_sale';
   status: 'pending' | 'completed' | 'rejected' | 'pending_delivery';
   method: string;
   details: string;
@@ -183,4 +185,46 @@ export interface MusicTrack {
   plays: number;
   price: number; // Pay per play to artist
   createdAt: number;
+}
+
+// --- DIGITAL MARKET TYPES ---
+
+export type DigitalCategory = 
+  | 'architecture' 
+  | 'graphics' 
+  | 'templates' 
+  | 'memes' 
+  | 'mechanical' 
+  | 'other';
+
+export type MechanicalSubCategory = 'car' | 'engine' | 'robot' | 'motor_parts' | 'general';
+
+export interface Storefront {
+  id: string;
+  ownerId: string;
+  storeName: string;
+  description: string;
+  bannerUrl: string;
+  logoUrl: string;
+  accentColor: string;
+  createdAt: number;
+  totalSales: number;
+  rating: number;
+}
+
+export interface DigitalProduct {
+  id: string;
+  storeId: string; // Links to Storefront
+  ownerId: string;
+  title: string;
+  description: string;
+  price: number;
+  category: DigitalCategory;
+  subCategory?: MechanicalSubCategory; // Specifically for mechanical
+  thumbnailUrl: string;
+  fileUrl: string; // The downloadable asset
+  fileType: string; // e.g., 'pdf', 'cad', 'png', 'zip'
+  previewImages?: string[];
+  createdAt: number;
+  sales: number;
 }

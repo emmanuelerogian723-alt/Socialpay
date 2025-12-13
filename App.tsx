@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Notification } from '../types';
-import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe, Gamepad2 } from 'lucide-react';
+import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe, Gamepad2, Check, Download } from 'lucide-react';
 import CreatorView from './components/CreatorView';
 import EngagerView from './components/EngagerView';
 import AdminView from './components/AdminView';
@@ -8,6 +9,7 @@ import ReelsView from './components/ReelsView';
 import GigsView from './components/GigsView';
 import CommunityView from './components/CommunityView';
 import GameCentreView from './components/GameCentreView';
+import { DigitalMarketView } from './components/DigitalMarketView';
 import SettingsView from './components/SettingsView';
 import LandingView from './components/LandingView';
 import { AuthView } from './components/AuthView';
@@ -15,7 +17,7 @@ import { ToastContainer } from './components/UIComponents';
 import { storageService } from './services/storageService';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 
-type ViewState = 'dashboard' | 'reels' | 'gigs' | 'community' | 'games' | 'settings';
+type ViewState = 'dashboard' | 'reels' | 'gigs' | 'digital-market' | 'community' | 'games' | 'settings';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -24,8 +26,10 @@ const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Load User Session & Handle Email Redirects
   useEffect(() => {
@@ -64,14 +68,29 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user) return;
     
-    const interval = setInterval(async () => {
+    const fetchNotes = async () => {
        const notes = await storageService.getNotifications(user.id);
-       setNotifications(notes.slice(0, 3)); 
+       // Show last 50 notifications in the dropdown
+       setNotifications(notes.slice(0, 50)); 
        setRefreshTrigger(prev => prev + 1);
-    }, 5000);
+    };
+
+    fetchNotes();
+    const interval = setInterval(fetchNotes, 5000);
 
     return () => clearInterval(interval);
   }, [user]);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+              setShowNotifications(false);
+          }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Toggle Dark Mode
   useEffect(() => {
@@ -97,6 +116,17 @@ const App: React.FC = () => {
     setUser(null);
     setCurrentView('dashboard');
     setShowWelcome(true);
+  };
+
+  const handleMarkRead = async (id: string) => {
+      await storageService.markNotificationRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  };
+
+  const handleMarkAllRead = async () => {
+      if(!user) return;
+      await storageService.markAllNotificationsRead(user.id);
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
   const NavItem = ({ icon: Icon, label, viewId, onClick }: any) => (
@@ -126,6 +156,8 @@ const App: React.FC = () => {
   if (!user) {
     return <AuthView onLogin={handleLogin} />;
   }
+
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex transition-colors duration-200 font-sans">
@@ -157,6 +189,7 @@ const App: React.FC = () => {
           <NavItem icon={LayoutDashboard} label="Dashboard" viewId="dashboard" />
           <NavItem icon={PlayCircle} label="Reels" viewId="reels" />
           <NavItem icon={ShoppingBag} label="Gig Market" viewId="gigs" />
+          <NavItem icon={Download} label="Digital Market" viewId="digital-market" />
           <NavItem icon={Globe} label="Community" viewId="community" />
           <NavItem icon={Gamepad2} label="Game Centre" viewId="games" />
           <div className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-6">Account</div>
@@ -182,14 +215,17 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
         {/* Header */}
-        <header className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 md:px-8">
+        <header className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 md:px-8 z-20 relative">
           <button onClick={() => setSidebarOpen(true)} className="md:hidden p-2 text-gray-600">
             <Menu className="w-6 h-6" />
           </button>
           
           <div className="flex-1 max-w-xl mx-4">
              <h2 className="text-lg font-semibold capitalize text-gray-700 dark:text-gray-200">
-               {currentView === 'gigs' ? 'Marketplace' : currentView === 'community' ? 'Community Feed' : currentView === 'games' ? 'Arcade' : currentView}
+               {currentView === 'gigs' ? 'Marketplace' : 
+                currentView === 'digital-market' ? 'Digital Store' :
+                currentView === 'community' ? 'Community Feed' : 
+                currentView === 'games' ? 'Arcade' : currentView}
              </h2>
           </div>
 
@@ -206,12 +242,59 @@ const App: React.FC = () => {
             >
               {darkMode ? <Sun className="w-5 h-5"/> : <Moon className="w-5 h-5"/>}
             </button>
-            <button className="relative p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-              <Bell className="w-5 h-5" />
-              {notifications.some(n => !n.read) && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
-              )}
-            </button>
+            
+            <div className="relative" ref={dropdownRef}>
+                <button 
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    className="relative p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+                >
+                  <Bell className="w-5 h-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white dark:border-gray-800"></span>
+                  )}
+                </button>
+
+                {showNotifications && (
+                    <div className="absolute top-12 right-0 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden animate-slide-up origin-top-right">
+                        <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/50">
+                            <h3 className="font-bold text-sm text-gray-700 dark:text-gray-200">Notifications</h3>
+                            {unreadCount > 0 && (
+                                <button className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium" onClick={handleMarkAllRead}>
+                                    Mark all read
+                                </button>
+                            )}
+                        </div>
+                        <div className="max-h-[400px] overflow-y-auto">
+                            {notifications.length === 0 && (
+                                <div className="p-8 text-center text-gray-500 text-sm">
+                                    <Bell className="w-8 h-8 mx-auto mb-2 opacity-20"/>
+                                    No notifications yet.
+                                </div>
+                            )}
+                            {notifications.map(n => (
+                                <div 
+                                    key={n.id} 
+                                    onClick={() => handleMarkRead(n.id)} 
+                                    className={`p-4 border-b border-gray-50 dark:border-gray-700/50 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors relative group ${!n.read ? 'bg-indigo-50/40 dark:bg-indigo-900/10' : ''}`}
+                                >
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className={`font-semibold text-sm ${!n.read ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-900 dark:text-gray-200'}`}>{n.title}</span>
+                                        <span className="text-[10px] text-gray-400 whitespace-nowrap ml-2">{new Date(n.timestamp).toLocaleDateString()}</span>
+                                    </div>
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">{n.message}</p>
+                                    {!n.read && (
+                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300 p-1 rounded-full" title="Mark as read">
+                                                <Check className="w-3 h-3" />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
           </div>
         </header>
 
@@ -226,15 +309,16 @@ const App: React.FC = () => {
           )}
           {currentView === 'reels' && <ReelsView user={user} />}
           {currentView === 'gigs' && <GigsView user={user} onUpdateUser={setUser} />}
+          {currentView === 'digital-market' && <DigitalMarketView user={user} onUpdateUser={setUser} />}
           {currentView === 'community' && <CommunityView user={user} />}
           {currentView === 'games' && <GameCentreView user={user} onUpdateUser={setUser} />}
           {currentView === 'settings' && <SettingsView user={user} onUpdateUser={setUser} />}
         </div>
         
-        {/* Toast Notifications */}
+        {/* Toast Notifications (Only showing recent unread items to avoid spam) */}
         <ToastContainer 
-          notifications={notifications} 
-          onDismiss={(id) => setNotifications(prev => prev.filter(n => n.id !== id))} 
+          notifications={notifications.filter(n => !n.read && (Date.now() - n.timestamp < 10000))} 
+          onDismiss={(id) => handleMarkRead(id)} 
         />
       </main>
     </div>

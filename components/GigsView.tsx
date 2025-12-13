@@ -543,7 +543,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                 <Package className="w-4 h-4 mr-2"/> My Orders
             </Button>
             <Button onClick={() => setActiveTab('create')}>
-                <Plus className="w-4 h-4 mr-2" /> Sell Asset
+                <Plus className="w-4 h-4 mr-2" /> Sell
             </Button>
         </div>
       </div>
@@ -603,7 +603,29 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                 </h3>
                 <div className="pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between mt-auto">
                     <div className="text-lg font-black text-gray-900 dark:text-white">${gig.price}</div>
-                    <Button size="sm" variant="secondary" className="px-3 py-1 h-8 text-xs">View</Button>
+                    <div className="flex space-x-2">
+                        <Button 
+                            size="sm" 
+                            variant="ghost"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedGig(gig);
+                            }}
+                        >
+                            View
+                        </Button>
+                        <Button 
+                            size="sm" 
+                            className="px-4 font-bold shadow-md bg-green-600 hover:bg-green-700"
+                            disabled={user.id === gig.sellerId}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handlePurchase(gig);
+                            }}
+                        >
+                            {user.id === gig.sellerId ? 'Yours' : 'Buy'}
+                        </Button>
+                    </div>
                 </div>
              </div>
           </div>
