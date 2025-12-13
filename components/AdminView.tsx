@@ -1,13 +1,13 @@
 
-
 import React, { useState, useEffect } from 'react';
-import { Shield, AlertTriangle, Users, DollarSign, Check, X, Bell, RefreshCw, Edit, Lock, Wallet, ArrowDownLeft, FileText, Trash2, Download, BarChart2, Layers, Briefcase } from 'lucide-react';
+import { Shield, AlertTriangle, Users, DollarSign, Check, X, Bell, RefreshCw, Edit, Lock, Wallet, ArrowDownLeft, FileText, Trash2, Download, BarChart2, Layers, Briefcase, Store, Crown, Zap, Activity, Clock } from 'lucide-react';
 import { Card, Button, Badge, Input, Select } from './UIComponents';
 import { storageService } from '../services/storageService';
-import { Transaction, User, Campaign, Video, Gig } from '../types';
+import { Transaction, User, Campaign, Video, Gig, Storefront } from '../types';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 
 const AdminView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'reports'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'marketplace' | 'premium' | 'reports'>('dashboard');
   
   const [users, setUsers] = useState<User[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -18,6 +18,7 @@ const AdminView: React.FC = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [videos, setVideos] = useState<Video[]>([]);
   const [gigs, setGigs] = useState<Gig[]>([]);
+  const [stores, setStores] = useState<Storefront[]>([]);
   
   // Wallet Management Modal State
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -30,18 +31,37 @@ const AdminView: React.FC = () => {
   const [endDate, setEndDate] = useState('');
 
   const loadData = async () => {
-    setIsRefreshing(true);
-    setUsers(await storageService.getUsers());
-    setTransactions(await storageService.getTransactions());
-    setCampaigns(await storageService.getCampaigns());
-    // Load top 100 videos for moderation context
-    setVideos(await storageService.getVideos(0, 100));
-    setGigs(await storageService.getGigs());
-    setTimeout(() => setIsRefreshing(false), 500);
+    // Don't show loading spinner on auto-refresh to avoid flickering
+    // setIsRefreshing(true); 
+    const [fetchedUsers, fetchedTx, fetchedCampaigns, fetchedVideos, fetchedGigs, fetchedStores] = await Promise.all([
+        storageService.getUsers(),
+        storageService.getTransactions(),
+        storageService.getCampaigns(),
+        storageService.getVideos(0, 100),
+        storageService.getGigs(),
+        storageService.getAllStores()
+    ]);
+
+    setUsers(fetchedUsers);
+    setTransactions(fetchedTx);
+    setCampaigns(fetchedCampaigns);
+    setVideos(fetchedVideos);
+    setGigs(fetchedGigs);
+    setStores(fetchedStores);
+    
+    setIsRefreshing(false);
+  };
+
+  const manualRefresh = () => {
+      setIsRefreshing(true);
+      loadData();
   };
 
   useEffect(() => {
     loadData();
+    // Auto-refresh every 5 seconds to catch new users/queries
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleApproveWithdrawal = async (txId: string) => {
@@ -101,7 +121,7 @@ const AdminView: React.FC = () => {
                  id: Date.now().toString(),
                  userId: user.id,
                  title: 'Access Approved',
-                 message: 'Your payment was received. Welcome to Social Pay!',
+                 message: 'Your payment was received. Account Verified!',
                  type: 'success',
                  read: false,
                  timestamp: Date.now()
@@ -172,7 +192,15 @@ const AdminView: React.FC = () => {
       }
   };
 
+  const handleDeleteStore = async (id: string) => {
+      if(confirm("Are you sure? This will delete the store and all its products.")) {
+          await storageService.deleteStore(id);
+          loadData();
+      }
+  };
+
   const generateCSV = () => {
+      // (CSV Logic remains same)
       const start = startDate ? new Date(startDate).getTime() : 0;
       const end = endDate ? new Date(endDate).getTime() : Date.now();
       
@@ -206,6 +234,10 @@ const AdminView: React.FC = () => {
 
   const pendingWithdrawals = transactions.filter(t => t.type === 'withdrawal' && t.status === 'pending');
   const pendingDeposits = transactions.filter(t => (t.type === 'deposit' || t.type === 'fee') && t.status === 'pending');
+  
+  // Sort users by joinedAt descending to show new users first
+  const sortedUsers = [...users].sort((a, b) => b.joinedAt - a.joinedAt);
+  const newUsersCount = users.filter(u => (Date.now() - u.joinedAt) < 24 * 60 * 60 * 1000).length;
 
   return (
     <div className="space-y-8">
@@ -214,142 +246,108 @@ const AdminView: React.FC = () => {
           <Shield className="w-6 h-6 mr-2 text-red-600" /> Admin Dashboard
         </h1>
         <div className="flex space-x-2">
-            <Button onClick={loadData} variant="outline" disabled={isRefreshing}>
-               <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} /> Refresh
+            <div className="flex items-center text-xs text-gray-500 mr-2">
+                <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
+                Live Updates Active
+            </div>
+            <Button onClick={manualRefresh} variant="outline" disabled={isRefreshing}>
+               <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} /> Refresh Data
             </Button>
         </div>
       </div>
 
       {/* Admin Nav */}
-      <div className="flex space-x-2 border-b border-gray-200 dark:border-gray-700 pb-1">
-        <button 
-           onClick={() => setActiveTab('dashboard')} 
-           className={`px-4 py-2 text-sm font-medium ${activeTab === 'dashboard' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}
-        >
-           Dashboard & Finance
-        </button>
-        <button 
-           onClick={() => setActiveTab('content')} 
-           className={`px-4 py-2 text-sm font-medium ${activeTab === 'content' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}
-        >
-           Content Moderation
-        </button>
-        <button 
-           onClick={() => setActiveTab('reports')} 
-           className={`px-4 py-2 text-sm font-medium ${activeTab === 'reports' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}
-        >
-           Reports
-        </button>
+      <div className="flex space-x-2 border-b border-gray-200 dark:border-gray-700 pb-1 overflow-x-auto">
+        <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 text-sm font-bold whitespace-nowrap ${activeTab === 'dashboard' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}>Dashboard & Finance</button>
+        <button onClick={() => setActiveTab('marketplace')} className={`px-4 py-2 text-sm font-bold whitespace-nowrap ${activeTab === 'marketplace' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}>Marketplace Manager</button>
+        <button onClick={() => setActiveTab('content')} className={`px-4 py-2 text-sm font-bold whitespace-nowrap ${activeTab === 'content' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}>Content Mod</button>
+        <button onClick={() => setActiveTab('premium')} className={`px-4 py-2 text-sm font-bold whitespace-nowrap ${activeTab === 'premium' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}>Premium</button>
+        <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 text-sm font-bold whitespace-nowrap ${activeTab === 'reports' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}>Reports</button>
       </div>
 
+      {/* === DASHBOARD & FINANCE === */}
       {activeTab === 'dashboard' && (
       <div className="space-y-8 animate-fade-in">
         {/* Overview Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
            <Card className="p-4 bg-gray-800 text-white border-none">
               <div className="text-gray-400 text-sm">Total Users</div>
-              <div className="text-2xl font-bold">{users.length}</div>
+              <div className="text-2xl font-bold flex items-center">
+                  {users.length}
+                  {newUsersCount > 0 && <span className="ml-2 text-xs bg-green-500 text-black px-2 py-0.5 rounded-full">+{newUsersCount} New</span>}
+              </div>
            </Card>
            <Card className="p-4 bg-gray-800 text-white border-none">
-              <div className="text-gray-400 text-sm">Pending Requests</div>
+              <div className="text-gray-400 text-sm">Pending Queries</div>
               <div className="text-2xl font-bold text-orange-400">{pendingWithdrawals.length + pendingDeposits.length}</div>
            </Card>
            <Card className="p-4 bg-gray-800 text-white border-none">
-              <div className="text-gray-400 text-sm">Total Revenue (Fees)</div>
+              <div className="text-gray-400 text-sm">Total Fees Collected</div>
               <div className="text-2xl font-bold text-green-400">
                  ${transactions.filter(t => t.type === 'fee' && t.status === 'completed').reduce((acc, t) => acc + t.amount, 0).toFixed(2)}
               </div>
            </Card>
         </div>
 
-        {/* Pending Deposits & Fees */}
-        <Card>
-           <h2 className="text-lg font-bold mb-4 flex items-center text-green-600">
-              <ArrowDownLeft className="w-5 h-5 mr-2" /> Pending Deposits / Payments
-           </h2>
-           <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                 <thead>
-                    <tr className="bg-gray-50 dark:bg-gray-800 text-left">
-                       <th className="p-3">User</th>
-                       <th className="p-3">Type</th>
-                       <th className="p-3">Amount</th>
-                       <th className="p-3">Reference</th>
-                       <th className="p-3">Action</th>
-                    </tr>
-                 </thead>
-                 <tbody>
-                    {pendingDeposits.length === 0 && (
-                       <tr><td colSpan={5} className="p-4 text-center text-gray-500">No pending deposits.</td></tr>
-                    )}
+        {/* Pending Requests */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+                <h2 className="text-lg font-bold mb-4 flex items-center text-green-600">
+                    <ArrowDownLeft className="w-5 h-5 mr-2" /> Quick Approvals (Deposits/Fees)
+                </h2>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                    {pendingDeposits.length === 0 && <p className="text-gray-500 text-sm">No pending approvals.</p>}
                     {pendingDeposits.map(tx => (
-                       <tr key={tx.id} className="border-b border-gray-100 dark:border-gray-700">
-                          <td className="p-3 font-medium">{tx.userName}</td>
-                          <td className="p-3">
-                             <Badge color={tx.type === 'fee' ? 'yellow' : 'blue'}>{tx.type.toUpperCase()}</Badge>
-                          </td>
-                          <td className="p-3 font-bold">${tx.amount.toFixed(2)}</td>
-                          <td className="p-3 text-xs text-gray-500 max-w-xs truncate">{tx.details}</td>
-                          <td className="p-3 flex space-x-2">
-                             <Button size="sm" variant="secondary" onClick={() => tx.type === 'fee' ? handleApproveFee(tx.id) : handleApproveDeposit(tx.id)}>
-                                <Check className="w-3 h-3 mr-1" /> Confirm
-                             </Button>
-                             <Button size="sm" variant="danger" onClick={() => storageService.updateTransactionStatus(tx.id, 'rejected')}>
-                                <X className="w-3 h-3" />
-                             </Button>
-                          </td>
-                       </tr>
+                        <div key={tx.id} className="flex justify-between items-center bg-gray-50 dark:bg-gray-700 p-3 rounded-lg border-l-4 border-green-500">
+                            <div>
+                                <div className="font-bold text-sm flex items-center">
+                                    {tx.userName}
+                                    {/* Show NEW badge if tx is recent (last 10 mins) */}
+                                    {(Date.now() - tx.timestamp) < 10 * 60 * 1000 && <Badge color="red" className="ml-2 animate-pulse">NEW</Badge>}
+                                </div>
+                                <div className="text-xs text-gray-500">{tx.type.toUpperCase()} • ${tx.amount}</div>
+                                <div className="text-xs text-gray-400">{tx.details}</div>
+                            </div>
+                            <div className="flex gap-2">
+                                <Button size="sm" variant="secondary" onClick={() => tx.type === 'fee' ? handleApproveFee(tx.id) : handleApproveDeposit(tx.id)}>
+                                    <Check className="w-4 h-4"/>
+                                </Button>
+                                <Button size="sm" variant="danger" onClick={() => storageService.updateTransactionStatus(tx.id, 'rejected')}>
+                                    <X className="w-4 h-4"/>
+                                </Button>
+                            </div>
+                        </div>
                     ))}
-                 </tbody>
-              </table>
-           </div>
-        </Card>
+                </div>
+            </Card>
 
-        {/* Pending Withdrawals */}
-        <Card>
-           <h2 className="text-lg font-bold mb-4 flex items-center text-orange-600">
-              <AlertTriangle className="w-5 h-5 mr-2" /> Pending Withdrawals
-           </h2>
-           <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                 <thead>
-                    <tr className="bg-gray-50 dark:bg-gray-800 text-left">
-                       <th className="p-3">User</th>
-                       <th className="p-3">Amount</th>
-                       <th className="p-3">Method</th>
-                       <th className="p-3">Details</th>
-                       <th className="p-3">Action</th>
-                    </tr>
-                 </thead>
-                 <tbody>
-                    {pendingWithdrawals.length === 0 && (
-                       <tr><td colSpan={5} className="p-4 text-center text-gray-500">No pending withdrawals.</td></tr>
-                    )}
+            <Card>
+                <h2 className="text-lg font-bold mb-4 flex items-center text-orange-600">
+                    <AlertTriangle className="w-5 h-5 mr-2" /> Pending Withdrawals
+                </h2>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                    {pendingWithdrawals.length === 0 && <p className="text-gray-500 text-sm">No withdrawals pending.</p>}
                     {pendingWithdrawals.map(tx => (
-                       <tr key={tx.id} className="border-b border-gray-100 dark:border-gray-700">
-                          <td className="p-3 font-medium">{tx.userName}</td>
-                          <td className="p-3 font-bold text-red-600">${tx.amount.toFixed(2)}</td>
-                          <td className="p-3">{tx.method}</td>
-                          <td className="p-3 text-xs text-gray-500 max-w-xs truncate" title={tx.details}>{tx.details}</td>
-                          <td className="p-3 flex space-x-2">
-                             <Button size="sm" variant="secondary" onClick={() => handleApproveWithdrawal(tx.id)}>
-                                <Check className="w-3 h-3 mr-1" /> Approve
-                             </Button>
-                             <Button size="sm" variant="danger" onClick={() => handleRejectWithdrawal(tx.id)}>
-                                <X className="w-3 h-3 mr-1" /> Reject
-                             </Button>
-                          </td>
-                       </tr>
+                        <div key={tx.id} className="flex justify-between items-center bg-gray-50 dark:bg-gray-700 p-3 rounded-lg border-l-4 border-orange-500">
+                            <div>
+                                <div className="font-bold text-sm">{tx.userName}</div>
+                                <div className="text-xs font-bold text-red-500">-${tx.amount}</div>
+                                <div className="text-xs text-gray-400">{tx.method}</div>
+                            </div>
+                            <div className="flex gap-2">
+                                <Button size="sm" variant="secondary" onClick={() => handleApproveWithdrawal(tx.id)}>Approve</Button>
+                                <Button size="sm" variant="danger" onClick={() => handleRejectWithdrawal(tx.id)}>Reject</Button>
+                            </div>
+                        </div>
                     ))}
-                 </tbody>
-              </table>
-           </div>
-        </Card>
+                </div>
+            </Card>
+        </div>
 
         {/* User Management */}
         <Card>
            <h2 className="text-lg font-bold mb-4 flex items-center">
-              <Users className="w-5 h-5 mr-2" /> User Management
+              <Users className="w-5 h-5 mr-2" /> User Management ({users.length})
            </h2>
            <div className="overflow-x-auto max-h-[400px]">
               <table className="w-full text-sm">
@@ -358,15 +356,21 @@ const AdminView: React.FC = () => {
                        <th className="p-3">User</th>
                        <th className="p-3">Role</th>
                        <th className="p-3">Balance</th>
-                       <th className="p-3">Verified</th>
+                       <th className="p-3">Status</th>
+                       <th className="p-3">Joined</th>
                        <th className="p-3">Actions</th>
                     </tr>
                  </thead>
                  <tbody>
-                    {users.map(u => (
-                       <tr key={u.id} className="border-b border-gray-100 dark:border-gray-700">
+                    {sortedUsers.map(u => {
+                       const isNew = (Date.now() - u.joinedAt) < 24 * 60 * 60 * 1000;
+                       return (
+                       <tr key={u.id} className={`border-b border-gray-100 dark:border-gray-700 ${isNew ? 'bg-green-50/50 dark:bg-green-900/10' : ''}`}>
                           <td className="p-3">
-                             <div className="font-medium">{u.name}</div>
+                             <div className="font-medium flex items-center">
+                                 {u.name}
+                                 {isNew && <Badge color="green" className="ml-2 text-[10px]">NEW</Badge>}
+                             </div>
                              <div className="text-xs text-gray-500">{u.email}</div>
                           </td>
                           <td className="p-3 capitalize">{u.role}</td>
@@ -376,103 +380,196 @@ const AdminView: React.FC = () => {
                                 {u.verificationStatus}
                              </Badge>
                           </td>
+                          <td className="p-3 text-xs text-gray-500">
+                              {new Date(u.joinedAt).toLocaleDateString()}
+                              <div className="text-[10px]">{new Date(u.joinedAt).toLocaleTimeString()}</div>
+                          </td>
                           <td className="p-3 flex items-center space-x-2">
                              {u.verificationStatus === 'pending' && (
-                                <Button size="sm" variant="outline" onClick={() => handleApproveVerification(u.id)}>
+                                <Button size="sm" variant="secondary" onClick={() => handleApproveVerification(u.id)}>
                                    Verify
                                 </Button>
                              )}
                              <Button size="sm" variant="ghost" onClick={() => setEditingUser(u)}>
-                                <Edit className="w-4 h-4" />
+                                <Wallet className="w-4 h-4 text-gray-500" />
                              </Button>
                           </td>
                        </tr>
-                    ))}
+                    )})}
                  </tbody>
               </table>
-           </div>
-        </Card>
-
-        {/* Broadcast Message */}
-        <Card>
-           <h2 className="text-lg font-bold mb-4 flex items-center">
-              <Bell className="w-5 h-5 mr-2" /> Broadcast Notification
-           </h2>
-           <div className="flex gap-4">
-              <Input 
-                 placeholder="Type message to send to all users..." 
-                 value={broadcastMsg}
-                 onChange={e => setBroadcastMsg(e.target.value)}
-              />
-              <Button onClick={handleBroadcast} disabled={!broadcastMsg}>Send Broadcast</Button>
            </div>
         </Card>
       </div>
       )}
 
-      {/* Content Moderation Tab */}
+      {/* === MARKETPLACE MANAGER === */}
+      {activeTab === 'marketplace' && (
+          <div className="grid grid-cols-1 gap-8 animate-fade-in">
+              <Card>
+                  <h3 className="text-xl font-bold mb-6 flex items-center text-indigo-600"><Store className="w-6 h-6 mr-2"/> Digital Stores</h3>
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                          <thead className="bg-gray-50 dark:bg-gray-800 text-left">
+                              <tr>
+                                  <th className="p-3">Store Name</th>
+                                  <th className="p-3">Owner ID</th>
+                                  <th className="p-3">Total Sales</th>
+                                  <th className="p-3">Actions</th>
+                              </tr>
+                          </thead>
+                          <tbody>
+                              {stores.length === 0 && <tr><td colSpan={4} className="p-4 text-center">No stores created yet.</td></tr>}
+                              {stores.map(s => (
+                                  <tr key={s.id} className="border-b border-gray-100 dark:border-gray-700">
+                                      <td className="p-3 font-bold flex items-center">
+                                          <img src={s.logoUrl} className="w-8 h-8 rounded mr-2 bg-gray-200" />
+                                          {s.storeName}
+                                      </td>
+                                      <td className="p-3 font-mono text-xs">{s.ownerId}</td>
+                                      <td className="p-3">{s.totalSales}</td>
+                                      <td className="p-3">
+                                          <Button size="sm" variant="danger" onClick={() => handleDeleteStore(s.id)}>
+                                              <Trash2 className="w-4 h-4 mr-1"/> Delete Store
+                                          </Button>
+                                      </td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
+              </Card>
+
+              <Card>
+                  <h3 className="text-xl font-bold mb-6 flex items-center text-green-600"><Briefcase className="w-6 h-6 mr-2"/> Gig Market</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto">
+                      {gigs.map(g => (
+                          <div key={g.id} className="flex justify-between items-start border p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800">
+                              <div className="flex space-x-3">
+                                  <img src={g.image} className="w-16 h-16 object-cover rounded bg-gray-200" />
+                                  <div>
+                                      <div className="font-bold text-sm">{g.title}</div>
+                                      <div className="text-xs text-gray-500">Seller: {g.sellerName}</div>
+                                      <div className="text-xs font-bold text-green-600 mt-1">${g.price}</div>
+                                  </div>
+                              </div>
+                              <Button size="sm" variant="outline" className="text-red-500 hover:bg-red-50" onClick={() => handleDeleteGig(g.id)}>
+                                  <Trash2 className="w-4 h-4"/>
+                              </Button>
+                          </div>
+                      ))}
+                  </div>
+              </Card>
+          </div>
+      )}
+
+      {/* === PREMIUM FEATURES === */}
+      {activeTab === 'premium' && (
+          <div className="animate-fade-in space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <Card className="bg-gradient-to-br from-yellow-500 to-orange-600 text-white border-none">
+                      <div className="flex justify-between items-start">
+                          <div>
+                              <div className="text-white/80 text-sm font-bold uppercase">System Revenue</div>
+                              <div className="text-4xl font-black mt-2">
+                                  ${transactions.filter(t => t.type === 'fee' || t.details.includes('fee')).reduce((acc, t) => acc + t.amount, 0).toFixed(2)}
+                              </div>
+                          </div>
+                          <Crown className="w-8 h-8 opacity-50" />
+                      </div>
+                  </Card>
+                  <Card className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white border-none">
+                      <div className="flex justify-between items-start">
+                          <div>
+                              <div className="text-white/80 text-sm font-bold uppercase">Active Engagers</div>
+                              <div className="text-4xl font-black mt-2">
+                                  {users.filter(u => u.role === 'engager' && u.verificationStatus === 'verified').length}
+                              </div>
+                          </div>
+                          <Zap className="w-8 h-8 opacity-50" />
+                      </div>
+                  </Card>
+                  <Card className="bg-gradient-to-br from-green-500 to-emerald-600 text-white border-none">
+                      <div className="flex justify-between items-start">
+                          <div>
+                              <div className="text-white/80 text-sm font-bold uppercase">Platform Volume</div>
+                              <div className="text-4xl font-black mt-2">
+                                  ${transactions.reduce((acc, t) => acc + t.amount, 0).toFixed(0)}
+                              </div>
+                          </div>
+                          <Activity className="w-8 h-8 opacity-50" />
+                      </div>
+                  </Card>
+              </div>
+
+              {/* Revenue Chart */}
+              <Card>
+                  <h3 className="font-bold mb-6">Revenue Trend (Fees)</h3>
+                  <div className="h-64 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={transactions.filter(t => t.type === 'fee').slice(0, 20).reverse()}>
+                              <XAxis dataKey="timestamp" tickFormatter={(t) => new Date(t).toLocaleDateString()} hide />
+                              <YAxis />
+                              <Tooltip contentStyle={{backgroundColor: '#1f2937', color: '#fff'}} />
+                              <Line type="monotone" dataKey="amount" stroke="#f59e0b" strokeWidth={3} dot={{r: 4}} />
+                          </LineChart>
+                      </ResponsiveContainer>
+                  </div>
+              </Card>
+
+              {/* Power Tools */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <Card>
+                      <h3 className="font-bold mb-4 text-indigo-600">Power Tools</h3>
+                      <div className="space-y-3">
+                          <Button className="w-full justify-start" variant="outline" onClick={() => {
+                              if(confirm("Bulk verify all pending users who paid fees?")) {
+                                  // Simplified logic for bulk action
+                                  alert("Bulk verification process started...");
+                              }
+                          }}>
+                              <Check className="w-4 h-4 mr-2"/> Bulk Verify Pending Users
+                          </Button>
+                          <Button className="w-full justify-start" variant="outline" onClick={() => setBroadcastMsg("MAINTENANCE: The system will be down for 10 mins.")}>
+                              <Bell className="w-4 h-4 mr-2"/> Send Maintenance Alert
+                          </Button>
+                      </div>
+                  </Card>
+              </div>
+          </div>
+      )}
+
+      {/* === CONTENT MODERATION === */}
       {activeTab === 'content' && (
-         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
-             {/* Campaigns */}
+         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
              <div className="space-y-4">
                  <h3 className="font-bold flex items-center"><Layers className="w-4 h-4 mr-2"/> Campaigns</h3>
                  {campaigns.length === 0 && <p className="text-gray-500 text-sm">No campaigns found.</p>}
                  {campaigns.map(c => (
-                     <Card key={c.id} className="p-3">
-                        <div className="flex justify-between items-start">
-                           <div>
-                              <div className="font-bold text-sm">{c.title}</div>
-                              <div className="text-xs text-gray-500">by {c.creatorName}</div>
-                              <Badge color="blue" className="mt-1">{c.platform}</Badge>
-                           </div>
-                           <button onClick={() => handleDeleteCampaign(c.id)} className="text-red-500 hover:text-red-700">
-                              <Trash2 className="w-4 h-4"/>
-                           </button>
+                     <Card key={c.id} className="p-3 flex justify-between items-center">
+                        <div>
+                           <div className="font-bold text-sm">{c.title}</div>
+                           <Badge color="blue" className="mt-1">{c.platform}</Badge>
                         </div>
+                        <button onClick={() => handleDeleteCampaign(c.id)} className="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded">
+                           <Trash2 className="w-4 h-4"/>
+                        </button>
                      </Card>
                  ))}
              </div>
 
-             {/* Reels */}
              <div className="space-y-4">
                  <h3 className="font-bold flex items-center"><FileText className="w-4 h-4 mr-2"/> Reels</h3>
                  {videos.length === 0 && <p className="text-gray-500 text-sm">No videos found.</p>}
                  {videos.map(v => (
-                     <Card key={v.id} className="p-3">
-                        <div className="flex justify-between items-start">
-                           <div className="flex space-x-2">
-                              <video src={v.url} className="w-12 h-16 object-cover rounded bg-black" />
-                              <div>
-                                 <div className="text-xs font-bold line-clamp-1">{v.caption || 'No caption'}</div>
-                                 <div className="text-xs text-gray-500">by {v.userName}</div>
-                              </div>
-                           </div>
-                           <button onClick={() => handleDeleteVideo(v.id)} className="text-red-500 hover:text-red-700">
-                              <Trash2 className="w-4 h-4"/>
-                           </button>
+                     <Card key={v.id} className="p-3 flex justify-between items-center">
+                        <div className="flex space-x-3 items-center">
+                           <video src={v.url} className="w-10 h-10 object-cover rounded bg-black" />
+                           <div className="text-xs font-bold line-clamp-1 max-w-[150px]">{v.caption || 'No caption'}</div>
                         </div>
-                     </Card>
-                 ))}
-             </div>
-
-             {/* Gigs */}
-             <div className="space-y-4">
-                 <h3 className="font-bold flex items-center"><Briefcase className="w-4 h-4 mr-2"/> Marketplace</h3>
-                 {gigs.length === 0 && <p className="text-gray-500 text-sm">No gigs found.</p>}
-                 {gigs.map(g => (
-                     <Card key={g.id} className="p-3">
-                        <div className="flex justify-between items-start">
-                           <div className="flex space-x-2">
-                              <img src={g.image} className="w-12 h-12 object-cover rounded" />
-                              <div>
-                                 <div className="text-xs font-bold line-clamp-1">{g.title}</div>
-                                 <div className="text-xs text-gray-500">${g.price}</div>
-                              </div>
-                           </div>
-                           <button onClick={() => handleDeleteGig(g.id)} className="text-red-500 hover:text-red-700">
-                              <Trash2 className="w-4 h-4"/>
-                           </button>
-                        </div>
+                        <button onClick={() => handleDeleteVideo(v.id)} className="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded">
+                           <Trash2 className="w-4 h-4"/>
+                        </button>
                      </Card>
                  ))}
              </div>

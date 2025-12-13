@@ -62,7 +62,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     };
     loadData();
 
-    // Check fee status
+    // Check fee status - Show modal if unpaid, but allow dashboard if pending
     if (user.role === 'engager' && user.verificationStatus === 'unpaid') {
       setShowFeeModal(true);
     }
@@ -104,7 +104,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     
     setIsProcessing(false);
     setShowFeeModal(false);
-    alert("Payment reported! Please wait for Admin approval.");
+    alert("Payment reported! You can now access the dashboard while Admin verifies.");
   };
 
   const handleProofImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -159,8 +159,6 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
         timestamp: Date.now()
       });
 
-      // Update Campaign Budget in DB (Simplified for example, ideally logic in backend function)
-      // Note: Real apps should handle this transactionally on backend
       setTasks(prev => prev.filter(t => t.id !== verifyingTask.id));
       
       setTimeout(() => {
@@ -193,8 +191,8 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     }
   };
 
-  // Fee Modal (Blocking)
-  if (showFeeModal) {
+  // Fee Modal (Blocking ONLY for unpaid users)
+  if (showFeeModal && user.verificationStatus === 'unpaid') {
     return (
       <div className="fixed inset-0 z-50 bg-gray-900/90 backdrop-blur-sm flex items-center justify-center p-4">
         <Card className="max-w-md w-full text-center p-8 animate-slide-up">
@@ -209,7 +207,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
           <BankDetails />
 
           <p className="text-xs text-gray-500 mb-4">
-             After making the transfer, click the button below. Your account will be activated upon Admin verification.
+             After making the transfer, click the button below. Your account will be pending admin approval.
           </p>
           
           <Button onClick={handlePayEntryFee} isLoading={isProcessing} className="w-full py-3 text-lg shadow-xl shadow-indigo-200 dark:shadow-none">
@@ -220,24 +218,22 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     );
   }
 
-  // Pending Verification State
-  if (user.verificationStatus === 'pending' && user.role === 'engager') {
-     return (
-        <div className="flex flex-col items-center justify-center h-[80vh] text-center p-6">
-           <div className="w-20 h-20 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mb-6 animate-pulse">
-              <Clock className="w-10 h-10" />
-           </div>
-           <h2 className="text-2xl font-bold mb-2">Verification Pending</h2>
-           <p className="text-gray-500 max-w-md">
-              We have received your fee payment report. The Admin is currently reviewing your transaction. You will be notified once your account is active.
-           </p>
-           <Button variant="outline" className="mt-6" onClick={() => window.location.reload()}>Check Status</Button>
-        </div>
-     );
-  }
-
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-20">
+      
+      {/* Pending Status Banner */}
+      {user.verificationStatus === 'pending' && (
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 p-4 rounded-xl flex items-start gap-3 animate-slide-up">
+              <Clock className="w-6 h-6 text-yellow-600 dark:text-yellow-500 flex-shrink-0" />
+              <div>
+                  <h4 className="font-bold text-yellow-800 dark:text-yellow-400">Verification Pending</h4>
+                  <p className="text-sm text-yellow-700 dark:text-yellow-500 mt-1">
+                      You can earn rewards, but withdrawals are paused until an Admin verifies your one-time fee payment.
+                  </p>
+              </div>
+          </div>
+      )}
+
       {/* Top Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="p-4 bg-gradient-to-br from-indigo-500 to-purple-600 text-white border-none shadow-lg transform hover:scale-[1.02] transition-transform">
@@ -517,8 +513,12 @@ const WalletSection: React.FC<{
   const [depositAmount, setDepositAmount] = useState('');
   const [depositRef, setDepositRef] = useState('');
 
+  const isVerified = user.verificationStatus === 'verified';
+
   const handleWithdraw = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isVerified) return alert("Account not verified. Withdrawals are disabled.");
+    
     const amt = parseFloat(withdrawAmount);
     if (isNaN(amt) || amt <= 0) return alert("Please enter a valid amount.");
     if (amt > user.balance) return alert("Insufficient funds");
@@ -591,6 +591,11 @@ const WalletSection: React.FC<{
             <Banknote className="w-5 h-5 mr-2 text-green-600" /> Request Withdrawal
           </h3>
           <form onSubmit={handleWithdraw} className="space-y-4">
+            {!isVerified && (
+                <div className="text-xs text-red-500 font-bold bg-red-50 p-2 rounded border border-red-100 mb-2">
+                    Withdrawals require verified account status.
+                </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-1">Amount ($)</label>
               <Input 
@@ -601,13 +606,14 @@ const WalletSection: React.FC<{
                   value={withdrawAmount}
                   onChange={e => setWithdrawAmount(e.target.value)}
                   placeholder="0.00"
+                  disabled={!isVerified}
                   required
               />
             </div>
             
             <div>
               <label className="block text-sm font-medium mb-1">Payment Method</label>
-              <Select value={method} onChange={e => setMethod(e.target.value)}>
+              <Select value={method} onChange={e => setMethod(e.target.value)} disabled={!isVerified}>
                 <option value="Bank Transfer">Bank Transfer</option>
                 <option value="Crypto (USDT)">Crypto (USDT)</option>
               </Select>
@@ -617,21 +623,21 @@ const WalletSection: React.FC<{
                 <>
                    <div>
                      <label className="block text-sm font-medium mb-1">Bank Name</label>
-                     <Input required value={bankName} onChange={e => setBankName(e.target.value)} placeholder="e.g. Chase, Access Bank" />
+                     <Input required value={bankName} onChange={e => setBankName(e.target.value)} placeholder="e.g. Chase, Access Bank" disabled={!isVerified} />
                    </div>
                    <div>
                      <label className="block text-sm font-medium mb-1">Account Number</label>
-                     <Input required value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="0000000000" />
+                     <Input required value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="0000000000" disabled={!isVerified} />
                    </div>
                 </>
             ) : (
                 <div>
                    <label className="block text-sm font-medium mb-1">Wallet Address (TRC20)</label>
-                   <Input required value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="T..." />
+                   <Input required value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="T..." disabled={!isVerified} />
                 </div>
             )}
 
-            <Button type="submit" className="w-full" disabled={user.balance < 5}>
+            <Button type="submit" className="w-full" disabled={user.balance < 5 || !isVerified}>
               Request Withdrawal
             </Button>
           </form>

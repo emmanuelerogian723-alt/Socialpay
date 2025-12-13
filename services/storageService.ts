@@ -1,5 +1,4 @@
 
-
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { User, Campaign, Transaction, Notification, Video, Gig, CommunityPost, CommunityComment, Draft, ChatMessage, MusicTrack, Conversation, Storefront, DigitalProduct } from '../types';
 
@@ -688,6 +687,17 @@ export const storageService = {
       }
       return getLocal<Storefront[]>('storefronts', []).find(s => s.ownerId === userId) || null;
   },
+  async getAllStores(): Promise<Storefront[]> {
+      if(USE_SUPABASE) {
+          const { data } = await supabase.from('storefronts').select('*').order('created_at', {ascending: false});
+          return (data || []).map((s:any) => ({
+              id: s.id, ownerId: s.owner_id, storeName: s.store_name, description: s.description,
+              bannerUrl: s.banner_url, logoUrl: s.logo_url, accentColor: s.accent_color,
+              createdAt: s.created_at, totalSales: s.total_sales, rating: s.rating
+          }));
+      }
+      return getLocal<Storefront[]>('storefronts', []);
+  },
   async createStore(s: Storefront) {
       if (USE_SUPABASE) await supabase.from('storefronts').insert([{
           id: s.id, owner_id: s.ownerId, store_name: s.storeName, description: s.description,
@@ -695,6 +705,10 @@ export const storageService = {
           total_sales: 0, rating: 5
       }]);
       else { const l = getLocal('storefronts', []); l.push(s); setLocal('storefronts', l); }
+  },
+  async deleteStore(id: string) {
+      if (USE_SUPABASE) await supabase.from('storefronts').delete().eq('id', id);
+      else { const l = getLocal<Storefront[]>('storefronts', []); setLocal('storefronts', l.filter(x => x.id !== id)); }
   },
   async updateStore(s: Storefront) {
       if (USE_SUPABASE) await supabase.from('storefronts').update({
