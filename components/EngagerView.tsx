@@ -17,7 +17,7 @@ interface EngagerViewProps {
 const PAYSTACK_PUBLIC_KEY = 'pk_test_392323232323232323232323232323'; 
 
 const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTrigger }) => {
-  const [activeTab, setActiveTab] = useState<'tasks' | 'wallet' | 'leaderboard' | 'profile'>('profile'); // Default to profile if unpaid, else tasks? Let's keep logic simple.
+  const [activeTab, setActiveTab] = useState<'tasks' | 'wallet' | 'leaderboard' | 'profile'>('profile'); 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [verifyingTask, setVerifyingTask] = useState<Task | null>(null);
   const [proofText, setProofText] = useState('');
@@ -71,60 +71,6 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     loadData();
   }, [refreshTrigger, user.id]);
 
-  // --- PAYSTACK INTEGRATION FOR FEE ---
-  const feeAmountUSD = 1.00;
-  const exchangeRate = 1500; // 1 USD = 1500 NGN (Example)
-  const feeAmountKobo = feeAmountUSD * exchangeRate * 100; // Convert to Kobo
-
-  const feeConfig = {
-      reference: (new Date()).getTime().toString(),
-      email: user.email,
-      amount: feeAmountKobo,
-      publicKey: PAYSTACK_PUBLIC_KEY,
-      metadata: {
-          custom_fields: [{ display_name: "Payment Type", variable_name: "payment_type", value: "verification_fee" }]
-      }
-  };
-
-  const initializeFeePayment = usePaystackPayment(feeConfig);
-
-  const onSuccessFee = async (reference: any) => {
-      setIsProcessing(true);
-      
-      const feeTx: Transaction = {
-        id: reference.reference,
-        userId: user.id,
-        userName: user.name,
-        amount: feeAmountUSD,
-        type: 'fee',
-        status: 'completed', // INSTANT SUCCESS
-        method: 'Paystack Card',
-        details: `Verification Fee (Ref: ${reference.reference})`,
-        timestamp: Date.now()
-      };
-      
-      await storageService.createTransaction(feeTx);
-      
-      // Update user status to VERIFIED immediately
-      const updatedUser = { ...user, verificationStatus: 'verified' as const };
-      await storageService.updateUser(updatedUser);
-      onUpdateUser(updatedUser);
-      
-      await storageService.createNotification({
-         id: Date.now().toString(),
-         userId: user.id,
-         title: 'Welcome to Social Pay!',
-         message: 'Payment successful. Your account is now verified.',
-         type: 'success',
-         read: false,
-         timestamp: Date.now()
-      });
-
-      setIsProcessing(false);
-      alert("Payment Successful! Account Verified.");
-      setActiveTab('tasks');
-  };
-
   const handlePayEntryFeeManual = async () => {
     setIsProcessing(true);
     const feeTx: Transaction = {
@@ -134,7 +80,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
       amount: 1.00,
       type: 'fee',
       status: 'pending',
-      method: 'Bank Transfer',
+      method: 'External/Bank',
       details: 'One-time access fee payment (Pending Approval)',
       timestamp: Date.now()
     };
@@ -230,7 +176,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
           </p>
           
           <Button 
-            onClick={() => initializeFeePayment(onSuccessFee, () => {})} 
+            onClick={() => window.open('https://paystack.shop/pay/socialpay', '_blank')} 
             isLoading={isProcessing} 
             className="w-full py-3 text-lg shadow-xl shadow-green-200 dark:shadow-none bg-green-600 hover:bg-green-700 mb-4"
           >
@@ -245,8 +191,12 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
           
           <BankDetails />
 
+          <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg text-xs text-blue-700 dark:text-blue-300 mb-4">
+             After completing payment via the Link or Transfer, click the button below to notify Admin for approval.
+          </div>
+
           <Button variant="outline" onClick={handlePayEntryFeeManual} isLoading={isProcessing} className="w-full py-2">
-             I Have Sent Manual Transfer
+             I Have Paid
           </Button>
       </Card>
   );
