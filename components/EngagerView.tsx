@@ -5,12 +5,16 @@ import { Task, User, Transaction, Platform, TaskType } from '../types';
 import { Card, Button, Badge, Input, Select, Modal, BankDetails } from './UIComponents';
 import { verifyEngagementProof } from '../services/geminiService';
 import { storageService } from '../services/storageService';
+import { usePaystackPayment } from 'react-paystack';
 
 interface EngagerViewProps {
   user: User;
   onUpdateUser: (u: User) => void;
   refreshTrigger: number;
 }
+
+// REPLACE WITH YOUR ACTUAL PUBLIC KEY
+const PAYSTACK_PUBLIC_KEY = 'pk_test_392323232323232323232323232323'; 
 
 const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTrigger }) => {
   const [activeTab, setActiveTab] = useState<'tasks' | 'wallet' | 'leaderboard' | 'profile'>('tasks');
@@ -68,6 +72,64 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     }
   }, [refreshTrigger, user.id, user.verificationStatus, user.role]);
 
+  // --- PAYSTACK INTEGRATION FOR FEE ---
+  const feeAmountUSD = 1.00;
+  const exchangeRate = 1500; // 1 USD = 1500 NGN (Example)
+  const feeAmountKobo = feeAmountUSD * exchangeRate * 100; // Convert to Kobo
+
+  const feeConfig = {
+      reference: (new Date()).getTime().toString(),
+      email: user.email,
+      amount: feeAmountKobo,
+      publicKey: PAYSTACK_PUBLIC_KEY,
+      metadata: {
+          custom_fields: [{ display_name: "Payment Type", variable_name: "payment_type", value: "verification_fee" }]
+      }
+  };
+
+  const initializeFeePayment = usePaystackPayment(feeConfig);
+
+  const onSuccessFee = async (reference: any) => {
+      setIsProcessing(true);
+      
+      const feeTx: Transaction = {
+        id: reference.reference,
+        userId: user.id,
+        userName: user.name,
+        amount: feeAmountUSD,
+        type: 'fee',
+        status: 'completed', // INSTANT SUCCESS
+        method: 'Paystack Card',
+        details: `Verification Fee (Ref: ${reference.reference})`,
+        timestamp: Date.now()
+      };
+      
+      await storageService.createTransaction(feeTx);
+      
+      // Update user status to VERIFIED immediately
+      const updatedUser = { ...user, verificationStatus: 'verified' as const };
+      await storageService.updateUser(updatedUser);
+      onUpdateUser(updatedUser);
+      
+      await storageService.createNotification({
+         id: Date.now().toString(),
+         userId: user.id,
+         title: 'Welcome to Social Pay!',
+         message: 'Payment successful. Your account is now verified.',
+         type: 'success',
+         read: false,
+         timestamp: Date.now()
+      });
+
+      setIsProcessing(false);
+      setShowFeeModal(false);
+      alert("Payment Successful! Account Verified.");
+  };
+
+  const onCloseFee = () => {
+      console.log('Payment closed');
+  };
+
   // --- FILTERING & SORTING LOGIC ---
   const filteredTasks = tasks.filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase());
@@ -81,7 +143,8 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     return 0; 
   });
 
-  const handlePayEntryFee = async () => {
+  // OLD MANUAL METHOD (Kept as fallback or reference, but UI now prioritizes Paystack)
+  const handlePayEntryFeeManual = async () => {
     setIsProcessing(true);
     const feeTx: Transaction = {
       id: '',
@@ -96,8 +159,6 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     };
     
     await storageService.createTransaction(feeTx);
-    
-    // Update user status
     const updatedUser = { ...user, verificationStatus: 'pending' as const };
     await storageService.updateUser(updatedUser);
     onUpdateUser(updatedUser);
@@ -180,17 +241,6 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     setVerificationResult(null);
   };
 
-  const handleProfileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      storageService.uploadMedia(file).then(async (url) => {
-        const updatedUser = { ...user, avatar: url };
-        await storageService.updateUser(updatedUser);
-        onUpdateUser(updatedUser);
-      });
-    }
-  };
-
   // Fee Modal (Blocking ONLY for unpaid users)
   if (showFeeModal && user.verificationStatus === 'unpaid') {
     return (
@@ -201,17 +251,31 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
           </div>
           <h2 className="text-2xl font-bold mb-2">One-Time Access Fee</h2>
           <p className="text-gray-500 mb-6">
-            To ensure quality and prevent spam, we require a small one-time verification fee of <strong>$1.00</strong>.
+            To ensure quality and prevent spam, we require a small one-time verification fee of <strong>$1.00</strong> (approx ₦1,500).
           </p>
+          
+          <Button 
+            onClick={() => initializeFeePayment(onSuccessFee, onCloseFee)} 
+            isLoading={isProcessing} 
+            className="w-full py-3 text-lg shadow-xl shadow-green-200 dark:shadow-none bg-green-600 hover:bg-green-700 mb-4"
+          >
+             Pay Instantly with Paystack
+          </Button>
+
+          <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
+              <span className="flex-shrink-0 mx-4 text-gray-400 text-xs">OR MANUAL TRANSFER</span>
+              <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
+          </div>
           
           <BankDetails />
 
           <p className="text-xs text-gray-500 mb-4">
-             After making the transfer, click the button below. Your account will be pending admin approval.
+             If you used manual transfer, click below. Admin approval required (2-24 hrs).
           </p>
           
-          <Button onClick={handlePayEntryFee} isLoading={isProcessing} className="w-full py-3 text-lg shadow-xl shadow-indigo-200 dark:shadow-none">
-             I Have Sent the Payment
+          <Button variant="outline" onClick={handlePayEntryFeeManual} isLoading={isProcessing} className="w-full py-2">
+             I Have Sent Manual Transfer
           </Button>
         </Card>
       </div>
@@ -495,7 +559,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
   );
 };
 
-// --- Sub Component: Wallet Section ---
+// --- Sub Component: Wallet Section (Updated with Paystack) ---
 const WalletSection: React.FC<{ 
   user: User; 
   transactions: Transaction[];
@@ -511,7 +575,43 @@ const WalletSection: React.FC<{
   const [showConfirm, setShowConfirm] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
-  const [depositRef, setDepositRef] = useState('');
+  
+  // Paystack Deposit Logic
+  const exchangeRate = 1500;
+  const depositKobo = depositAmount ? parseFloat(depositAmount) * exchangeRate * 100 : 0;
+  const depositConfig = {
+      reference: (new Date()).getTime().toString(),
+      email: user.email,
+      amount: depositKobo,
+      publicKey: PAYSTACK_PUBLIC_KEY,
+  };
+  const initializeDeposit = usePaystackPayment(depositConfig);
+
+  const onSuccessDeposit = async (reference: any) => {
+      const amountUSD = parseFloat(depositAmount);
+      
+      const tx: Transaction = {
+       id: reference.reference,
+       userId: user.id,
+       userName: user.name,
+       amount: amountUSD,
+       type: 'deposit',
+       status: 'completed', // Instant completion
+       method: 'Paystack Card',
+       details: `Wallet Deposit (Ref: ${reference.reference})`,
+       timestamp: Date.now()
+     };
+
+     await storageService.createTransaction(tx);
+     
+     const updatedUser = { ...user, balance: user.balance + amountUSD };
+     await storageService.updateUser(updatedUser);
+     onUpdateUser(updatedUser);
+
+     setShowDepositModal(false);
+     setDepositAmount('');
+     alert("Deposit Successful! Balance updated.");
+  };
 
   const isVerified = user.verificationStatus === 'verified';
 
@@ -546,28 +646,6 @@ const WalletSection: React.FC<{
     setAccountNumber('');
     setLoading(false);
     setShowConfirm(false);
-  };
-
-  const handleDeposit = async () => {
-     if(!depositAmount || !depositRef) return alert("Please fill in all details");
-     
-     const tx: Transaction = {
-       id: '',
-       userId: user.id,
-       userName: user.name,
-       amount: parseFloat(depositAmount),
-       type: 'deposit',
-       status: 'pending',
-       method: 'Bank Transfer',
-       details: `Ref/Name: ${depositRef}`,
-       timestamp: Date.now()
-     };
-
-     await storageService.createTransaction(tx);
-     setShowDepositModal(false);
-     setDepositAmount('');
-     setDepositRef('');
-     alert("Deposit request submitted! Funds will be added after Admin approval.");
   };
 
   return (
@@ -680,27 +758,24 @@ const WalletSection: React.FC<{
       </Card>
 
       <Modal isOpen={showDepositModal} onClose={() => setShowDepositModal(false)} title="Add Funds">
-         <BankDetails />
          <div className="space-y-4">
             <div>
-               <label className="block text-sm font-medium mb-1">Amount Deposited ($)</label>
+               <label className="block text-sm font-medium mb-1">Amount to Deposit ($)</label>
                <Input 
                  type="number" 
                  value={depositAmount} 
                  onChange={e => setDepositAmount(e.target.value)} 
                  placeholder="0.00"
                />
+               <p className="text-xs text-gray-500 mt-1">Approx. ₦{(parseFloat(depositAmount || '0') * exchangeRate).toLocaleString()}</p>
             </div>
-            <div>
-               <label className="block text-sm font-medium mb-1">Sender Name / Ref ID</label>
-               <Input 
-                 placeholder="Name on bank account" 
-                 value={depositRef} 
-                 onChange={e => setDepositRef(e.target.value)} 
-               />
-            </div>
-            <Button className="w-full" onClick={handleDeposit}>
-               Submit Payment Notification
+            
+            <Button 
+                className="w-full bg-green-600 hover:bg-green-700 text-white" 
+                onClick={() => initializeDeposit(onSuccessDeposit, () => {})}
+                disabled={!depositAmount || parseFloat(depositAmount) <= 0}
+            >
+               Pay with Paystack
             </Button>
          </div>
       </Modal>

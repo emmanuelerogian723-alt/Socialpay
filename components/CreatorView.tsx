@@ -5,11 +5,15 @@ import { Campaign, User, TaskType, Platform, Transaction } from '../types';
 import { Card, Button, Input, Select, Badge, Modal, BankDetails } from './UIComponents';
 import { generateCampaignInsights } from '../services/geminiService';
 import { storageService } from '../services/storageService';
+import { usePaystackPayment } from 'react-paystack';
 
 interface CreatorViewProps {
   user: User;
   onUpdateUser: (u: User) => void;
 }
+
+// REPLACE WITH YOUR ACTUAL PUBLIC KEY
+const PAYSTACK_PUBLIC_KEY = 'pk_test_392323232323232323232323232323'; 
 
 const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
   const [view, setView] = useState<'dashboard' | 'create' | 'profile'>('dashboard');
@@ -18,7 +22,45 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
   const [loadingInsight, setLoadingInsight] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
-  const [depositRef, setDepositRef] = useState('');
+  
+  // Paystack Configuration
+  const exchangeRate = 1500; // 1 USD = 1500 NGN
+  const depositKobo = depositAmount ? parseFloat(depositAmount) * exchangeRate * 100 : 0;
+  
+  const depositConfig = {
+      reference: (new Date()).getTime().toString(),
+      email: user.email,
+      amount: depositKobo,
+      publicKey: PAYSTACK_PUBLIC_KEY,
+  };
+  
+  const initializeDeposit = usePaystackPayment(depositConfig);
+
+  const onSuccessDeposit = async (reference: any) => {
+      const amountUSD = parseFloat(depositAmount);
+      
+      const tx: Transaction = {
+       id: reference.reference,
+       userId: user.id,
+       userName: user.name,
+       amount: amountUSD,
+       type: 'deposit',
+       status: 'completed',
+       method: 'Paystack Card',
+       details: `Wallet Deposit (Ref: ${reference.reference})`,
+       timestamp: Date.now()
+     };
+
+     await storageService.createTransaction(tx);
+     
+     const updatedUser = { ...user, balance: user.balance + amountUSD };
+     await storageService.updateUser(updatedUser);
+     onUpdateUser(updatedUser);
+
+     setShowDepositModal(false);
+     setDepositAmount('');
+     alert("Funds Added Successfully!");
+  };
 
   useEffect(() => {
     const loadCampaigns = async () => {
@@ -92,28 +134,6 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
     setInsight(result);
     setLoadingInsight(false);
   }
-
-  const handleDeposit = async () => {
-     if(!depositAmount || !depositRef) return alert("Please fill in all details");
-     
-     const tx: Transaction = {
-       id: Date.now().toString(),
-       userId: user.id,
-       userName: user.name,
-       amount: parseFloat(depositAmount),
-       type: 'deposit',
-       status: 'pending',
-       method: 'Bank Transfer',
-       details: `Ref/Name: ${depositRef}`,
-       timestamp: Date.now()
-     };
-
-     await storageService.createTransaction(tx);
-     setShowDepositModal(false);
-     setDepositAmount('');
-     setDepositRef('');
-     alert("Deposit request submitted! Funds will be added after Admin approval.");
-  };
 
   const handleProfileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -240,7 +260,7 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
             </Button>
             {user.balance < (newCampaign.totalBudget || 0) && (
               <p className="text-center text-sm text-indigo-600 cursor-pointer hover:underline" onClick={() => setShowDepositModal(true)}>
-                Click here to add funds via Bank Transfer
+                Click here to add funds instantly
               </p>
             )}
           </form>
@@ -489,31 +509,24 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
       )}
 
       <Modal isOpen={showDepositModal} onClose={() => setShowDepositModal(false)} title="Add Funds">
-         <BankDetails />
-         
          <div className="space-y-4">
             <div>
-               <label className="block text-sm font-medium mb-1">Amount Deposited ($)</label>
+               <label className="block text-sm font-medium mb-1">Amount to Deposit ($)</label>
                <Input 
                  type="number" 
                  value={depositAmount} 
                  onChange={e => setDepositAmount(e.target.value)} 
                  placeholder="0.00"
                />
+               <p className="text-xs text-gray-500 mt-1">Approx. ₦{(parseFloat(depositAmount || '0') * exchangeRate).toLocaleString()}</p>
             </div>
-            <div>
-               <label className="block text-sm font-medium mb-1">Sender Name / Ref ID</label>
-               <Input 
-                 placeholder="Name on bank account" 
-                 value={depositRef} 
-                 onChange={e => setDepositRef(e.target.value)} 
-               />
-               <p className="text-xs text-gray-500 mt-1">
-                 Please provide the name of the sender so we can track your payment.
-               </p>
-            </div>
-            <Button className="w-full" onClick={handleDeposit}>
-               Submit Payment Notification
+            
+            <Button 
+                className="w-full bg-green-600 hover:bg-green-700 text-white" 
+                onClick={() => initializeDeposit(onSuccessDeposit, () => {})}
+                disabled={!depositAmount || parseFloat(depositAmount) <= 0}
+            >
+               Pay with Paystack
             </Button>
          </div>
       </Modal>
