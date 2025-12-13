@@ -729,6 +729,21 @@ export const storageService = {
       }]);
       else { const l = getLocal('digital_products', []); l.unshift(p); setLocal('digital_products', l); }
   },
+  async updateDigitalProduct(p: DigitalProduct) {
+      if(USE_SUPABASE) await supabase.from('digital_products').update({
+          title: p.title, description: p.description, price: p.price, category: p.category, 
+          sub_category: p.subCategory, thumbnail_url: p.thumbnailUrl, file_url: p.fileUrl, file_type: p.fileType
+      }).eq('id', p.id);
+      else {
+          const l = getLocal<DigitalProduct[]>('digital_products', []);
+          const idx = l.findIndex(x=>x.id===p.id);
+          if(idx!==-1) { l[idx]=p; setLocal('digital_products', l); }
+      }
+  },
+  async deleteDigitalProduct(id: string) {
+      if(USE_SUPABASE) await supabase.from('digital_products').delete().eq('id', id);
+      else { const l = getLocal<DigitalProduct[]>('digital_products', []); setLocal('digital_products', l.filter(x=>x.id!==id)); }
+  },
   async recordDigitalSale(productId: string, price: number, sellerId: string) {
       // 1. Increment Sales
       // 2. Pay Seller (85% to seller, 15% platform fee for digital goods)
