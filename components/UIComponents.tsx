@@ -1,5 +1,7 @@
-import React from 'react';
-import { Loader2, X, Copy, Check } from 'lucide-react';
+
+import React, { useState, useRef, useEffect } from 'react';
+import { Loader2, X, Copy, Check, ScanFace, Award, Fingerprint } from 'lucide-react';
+import { Certificate } from '../types';
 
 export const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
   <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 transition-all ${className}`}>
@@ -53,11 +55,14 @@ export const Badge: React.FC<{ children: React.ReactNode; color?: 'blue' | 'gree
   );
 };
 
-export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (props) => (
-  <input 
-    {...props} 
-    className={`w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-white placeholder-gray-400 text-sm disabled:bg-gray-100 dark:disabled:bg-gray-800 transition-colors ${props.className}`} 
-  />
+export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { label?: string }> = ({ label, className = '', ...props }) => (
+  <div className="w-full">
+    {label && <label className="block text-sm font-medium mb-1 dark:text-gray-300">{label}</label>}
+    <input 
+      {...props} 
+      className={`w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-white placeholder-gray-400 text-sm disabled:bg-gray-100 dark:disabled:bg-gray-800 transition-colors ${className}`} 
+    />
+  </div>
 );
 
 export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (props) => (
@@ -148,4 +153,118 @@ export const BankDetails: React.FC = () => {
       </div>
     </div>
   );
+};
+
+// --- NEW COMPONENT: Human Verification Modal ---
+export const HumanVerificationModal: React.FC<{ isOpen: boolean, onClose: () => void, onSuccess: () => void }> = ({ isOpen, onClose, onSuccess }) => {
+    const [step, setStep] = useState<'intro' | 'scanning' | 'success'>('intro');
+    const videoRef = useRef<HTMLVideoElement>(null);
+
+    const startScan = async () => {
+        setStep('scanning');
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+            }
+            // Simulate AI check delay
+            setTimeout(() => {
+                stream.getTracks().forEach(track => track.stop());
+                setStep('success');
+            }, 3000);
+        } catch (e) {
+            alert("Camera access denied. Please enable camera to verify.");
+            setStep('intro');
+        }
+    };
+
+    const handleFinish = () => {
+        onSuccess();
+        setStep('intro'); // reset for next time if needed
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Identity Verification">
+            {step === 'intro' && (
+                <div className="text-center space-y-4">
+                    <div className="bg-indigo-100 dark:bg-indigo-900/30 w-20 h-20 rounded-full flex items-center justify-center mx-auto">
+                        <ScanFace className="w-10 h-10 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                    <div>
+                        <h3 className="text-xl font-bold">Verify You Are Human</h3>
+                        <p className="text-gray-500 text-sm mt-2">
+                            To maintain a secure marketplace, we require all sellers to pass a quick liveness check. This prevents bots and fraud.
+                        </p>
+                    </div>
+                    <ul className="text-left text-sm space-y-2 bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                        <li className="flex items-center"><Check className="w-4 h-4 mr-2 text-green-500"/> Position your face in the frame</li>
+                        <li className="flex items-center"><Check className="w-4 h-4 mr-2 text-green-500"/> Ensure good lighting</li>
+                        <li className="flex items-center"><Check className="w-4 h-4 mr-2 text-green-500"/> Takes less than 5 seconds</li>
+                    </ul>
+                    <Button onClick={startScan} className="w-full">Start Verification</Button>
+                </div>
+            )}
+
+            {step === 'scanning' && (
+                <div className="text-center">
+                    <div className="relative w-64 h-64 mx-auto rounded-full overflow-hidden border-4 border-indigo-500 mb-4 bg-black">
+                        <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
+                        <div className="absolute inset-0 border-4 border-white/20 rounded-full animate-pulse"></div>
+                        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-transparent via-indigo-500/20 to-transparent animate-scan"></div>
+                    </div>
+                    <p className="font-bold text-indigo-600 animate-pulse">Analyzing Biometrics...</p>
+                    <p className="text-xs text-gray-500">Please hold still</p>
+                </div>
+            )}
+
+            {step === 'success' && (
+                <div className="text-center space-y-4 animate-fade-in">
+                    <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto">
+                        <Check className="w-10 h-10 text-green-600" />
+                    </div>
+                    <div>
+                        <h3 className="text-xl font-bold text-green-700">Verification Complete</h3>
+                        <p className="text-gray-500 text-sm mt-2">You are now verified as a human seller.</p>
+                    </div>
+                    <Button onClick={handleFinish} className="w-full bg-green-600 hover:bg-green-700">Continue</Button>
+                </div>
+            )}
+        </Modal>
+    );
+};
+
+// --- NEW COMPONENT: Certificate Card ---
+export const CertificateCard: React.FC<{ cert: Certificate, userName: string }> = ({ cert, userName }) => {
+    const themeStyles = {
+        gold: "from-yellow-400 to-yellow-600 border-yellow-300 text-yellow-900",
+        silver: "from-gray-300 to-gray-500 border-gray-400 text-gray-900",
+        bronze: "from-orange-300 to-orange-500 border-orange-400 text-orange-900",
+        platinum: "from-cyan-300 to-blue-500 border-cyan-400 text-cyan-900"
+    };
+
+    return (
+        <div className={`relative overflow-hidden rounded-xl border-4 bg-gradient-to-br ${themeStyles[cert.theme]} p-6 shadow-xl transform hover:scale-105 transition-transform cursor-default`}>
+            {/* Watermark/Pattern */}
+            <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+            
+            <div className="relative z-10 flex flex-col items-center text-center">
+                <div className="bg-white/90 p-3 rounded-full shadow-lg mb-3">
+                    <Award className="w-8 h-8 text-black" />
+                </div>
+                <h4 className="text-xs font-bold uppercase tracking-[0.2em] mb-1 opacity-80">SocialPay Certified</h4>
+                <h3 className="text-xl font-black mb-2 font-serif">{cert.title}</h3>
+                <p className="text-xs font-medium mb-4 opacity-90 max-w-[200px]">{cert.description}</p>
+                
+                <div className="w-full border-t border-black/10 my-2"></div>
+                
+                <div className="flex justify-between w-full text-[10px] font-bold uppercase tracking-wide opacity-70">
+                    <span>Issued to: {userName}</span>
+                    <span>{new Date(cert.issuedAt).toLocaleDateString()}</span>
+                </div>
+            </div>
+            
+            {/* Shiny effect */}
+            <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/20 to-white/0 pointer-events-none"></div>
+        </div>
+    );
 };

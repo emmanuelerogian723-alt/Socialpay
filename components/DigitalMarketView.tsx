@@ -2,12 +2,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Storefront, DigitalProduct, DigitalCategory, MechanicalSubCategory } from '../types';
 import { storageService } from '../services/storageService';
-import { Card, Button, Input, Select, Modal, Badge } from './UIComponents';
+import { Card, Button, Input, Select, Modal, Badge, HumanVerificationModal } from './UIComponents';
 import { 
     ShoppingBag, Store, Edit3, Plus, Upload, Palette, Image as ImageIcon, 
     Download, Layout, Search, Filter, PenTool, Cpu, Building2, Smile, Box,
     ChevronRight, Save, Eye, Settings, FileText, CheckCircle, Trash2, 
-    BarChart, DollarSign, Package, PieChart, MoreVertical, LayoutDashboard
+    BarChart, DollarSign, Package, PieChart, MoreVertical, LayoutDashboard,
+    ScanFace, BoxSelect
 } from 'lucide-react';
 import { Bar, BarChart as RechartsBarChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -54,6 +55,7 @@ const StoreEditor: React.FC<StoreEditorProps> = ({ user, currentStore, products,
     );
     const [isSaving, setIsSaving] = useState(false);
     const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'design'>('dashboard');
+    const [is3DMode, setIs3DMode] = useState(false); // New 3D toggle
     
     // Product State
     const [showProductModal, setShowProductModal] = useState(false);
@@ -195,7 +197,7 @@ const StoreEditor: React.FC<StoreEditorProps> = ({ user, currentStore, products,
                         onClick={() => setActiveTab('design')}
                         className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${activeTab === 'design' ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                     >
-                        <Palette className="w-5 h-5 mr-3"/> Design
+                        <Palette className="w-5 h-5 mr-3"/> Design Studio
                     </button>
                 </nav>
 
@@ -361,7 +363,10 @@ const StoreEditor: React.FC<StoreEditorProps> = ({ user, currentStore, products,
                     <div className="flex-1 flex flex-col lg:flex-row h-full overflow-hidden animate-slide-up">
                         {/* Editor Form */}
                         <div className="w-full lg:w-1/3 p-6 border-r border-gray-100 dark:border-gray-700 overflow-y-auto">
-                            <h3 className="font-bold mb-6 text-lg">Store Appearance</h3>
+                            <h3 className="font-bold mb-6 text-lg flex items-center justify-between">
+                                Store Appearance
+                                <Badge color="yellow" className="text-xs">Premium Enabled</Badge>
+                            </h3>
                             <div className="space-y-6">
                                 <div>
                                     <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Store Name</label>
@@ -411,25 +416,53 @@ const StoreEditor: React.FC<StoreEditorProps> = ({ user, currentStore, products,
                         </div>
 
                         {/* Live Preview */}
-                        <div className="w-full lg:w-2/3 bg-gray-100 dark:bg-gray-950 overflow-y-auto relative">
-                            <div className="absolute top-4 right-4 bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-bold z-10 shadow-lg pointer-events-none flex items-center">
-                                <Eye className="w-3 h-3 mr-1"/> Live Preview
+                        <div className="w-full lg:w-2/3 bg-gray-100 dark:bg-gray-950 overflow-y-auto relative perspective-1000 p-8">
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-bold flex items-center shadow-lg">
+                                    <Eye className="w-3 h-3 mr-1"/> Live Preview
+                                </div>
+                                <button 
+                                    onClick={() => setIs3DMode(!is3DMode)}
+                                    className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center transition-all ${is3DMode ? 'bg-cyan-500 text-white shadow-[0_0_15px_cyan]' : 'bg-gray-200 dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
+                                >
+                                    <BoxSelect className="w-3 h-3 mr-1" /> 3D View
+                                </button>
                             </div>
-                            <div className="min-h-full bg-white dark:bg-gray-900 shadow-2xl mx-auto max-w-2xl my-8 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800">
+
+                            <div 
+                                className={`min-h-full bg-white dark:bg-gray-900 shadow-2xl mx-auto max-w-2xl rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800 transition-all duration-700 ease-out transform ${is3DMode ? 'rotate-y-12 rotate-x-6 scale-95 hover:rotate-0 hover:scale-100 shadow-[20px_20px_60px_rgba(0,0,0,0.5)]' : ''}`}
+                                style={{ transformStyle: 'preserve-3d' }}
+                            >
                                 {/* Simulated Store Header */}
                                 <div className="h-48 w-full relative">
                                     <img src={formData.bannerUrl} className="w-full h-full object-cover" />
-                                    <div className="absolute -bottom-10 left-8">
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                                    <div className="absolute -bottom-10 left-8 flex items-end space-x-4">
                                         <img src={formData.logoUrl} className="w-24 h-24 rounded-xl border-4 border-white dark:border-gray-900 shadow-lg object-cover" />
+                                        <div className="pb-12 text-white drop-shadow-md">
+                                            <h1 className="text-3xl font-black mb-1">{formData.storeName}</h1>
+                                            <div className="flex items-center text-xs opacity-90">
+                                                <Badge color="yellow" className="mr-2">Premium Seller</Badge>
+                                                <span>• 5.0 Rating</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="pt-14 px-8 pb-8">
-                                    <h1 className="text-3xl font-black text-gray-900 dark:text-white mb-2">{formData.storeName}</h1>
                                     <p className="text-gray-500 mb-6">{formData.description}</p>
                                     <hr className="border-gray-100 dark:border-gray-800 mb-6"/>
+                                    
+                                    {/* Products Grid Mockup */}
                                     <div className="grid grid-cols-2 gap-4">
                                         {[1, 2, 3, 4].map(i => (
-                                            <div key={i} className="aspect-[3/4] bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse"></div>
+                                            <div key={i} className="group relative aspect-[3/4] bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+                                                {/* 3D Float Effect on Hover */}
+                                                <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-purple-500/5"></div>
+                                                <div className="absolute bottom-0 left-0 right-0 p-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm transform translate-y-full group-hover:translate-y-0 transition-transform">
+                                                    <div className="h-3 w-3/4 bg-gray-300 dark:bg-gray-600 rounded mb-2"></div>
+                                                    <div className="h-3 w-1/2 bg-indigo-500 rounded"></div>
+                                                </div>
+                                            </div>
                                         ))}
                                     </div>
                                 </div>
@@ -522,6 +555,7 @@ export const DigitalMarketView: React.FC<DigitalMarketViewProps> = ({ user, onUp
     const [viewMode, setViewMode] = useState<'market' | 'my-store' | 'create-store'>('market');
     const [myStore, setMyStore] = useState<Storefront | null>(null);
     const [products, setProducts] = useState<DigitalProduct[]>([]);
+    const [showVerification, setShowVerification] = useState(false);
     
     // Market Filters
     const [search, setSearch] = useState('');
@@ -538,6 +572,22 @@ export const DigitalMarketView: React.FC<DigitalMarketViewProps> = ({ user, onUp
         setMyStore(store);
         const allProducts = await storageService.getDigitalProducts();
         setProducts(allProducts);
+    };
+
+    const handleCreateStoreClick = () => {
+        if (!user.isHuman) {
+            setShowVerification(true);
+        } else {
+            setViewMode(myStore ? 'my-store' : 'create-store');
+        }
+    };
+
+    const handleVerificationSuccess = async () => {
+        setShowVerification(false);
+        const updatedUser = { ...user, isHuman: true };
+        await storageService.updateUser(updatedUser);
+        onUpdateUser(updatedUser);
+        setViewMode(myStore ? 'my-store' : 'create-store');
     };
 
     const handlePurchase = async (product: DigitalProduct) => {
@@ -607,7 +657,7 @@ export const DigitalMarketView: React.FC<DigitalMarketViewProps> = ({ user, onUp
                     <div className="flex gap-3">
                         <Button 
                             className="bg-white text-indigo-900 hover:bg-gray-100 font-bold shadow-lg transform hover:-translate-y-0.5 transition-all"
-                            onClick={() => setViewMode(myStore ? 'my-store' : 'create-store')}
+                            onClick={handleCreateStoreClick}
                         >
                             <Store className="w-4 h-4 mr-2" />
                             {myStore ? 'Manage My Store' : 'Create Your Store'}
@@ -695,7 +745,7 @@ export const DigitalMarketView: React.FC<DigitalMarketViewProps> = ({ user, onUp
                     </div>
                     <h3 className="text-xl font-bold text-gray-600 dark:text-gray-400">Market is empty</h3>
                     <p className="text-gray-500">Be the first to create a store and upload products!</p>
-                    <Button className="mt-4" onClick={() => setViewMode('create-store')}>Start Selling</Button>
+                    <Button className="mt-4" onClick={handleCreateStoreClick}>Start Selling</Button>
                 </div>
             )}
 
@@ -743,6 +793,13 @@ export const DigitalMarketView: React.FC<DigitalMarketViewProps> = ({ user, onUp
                     </div>
                 )}
             </Modal>
+
+            {/* Human Verification Modal */}
+            <HumanVerificationModal 
+                isOpen={showVerification} 
+                onClose={() => setShowVerification(false)} 
+                onSuccess={handleVerificationSuccess} 
+            />
         </div>
     );
 };

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Gig, User, Transaction, Conversation, ChatMessage } from '../types';
 import { storageService } from '../services/storageService';
 import { analyzeChatRisk } from '../services/geminiService';
-import { Card, Button, Input, Badge, Select, Modal } from './UIComponents';
+import { Card, Button, Input, Badge, Select, Modal, HumanVerificationModal } from './UIComponents';
 import { Plus, ShoppingBag, Search, Star, Lock, Clock, Smartphone, Mail, Globe, ShieldCheck, Eye, AlertTriangle, CheckCircle, Package, ArrowRight, MessageCircle, Send, X, ShieldAlert, Upload, Edit3, Check } from 'lucide-react';
 
 interface GigsViewProps {
@@ -29,7 +29,8 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     price: 10
   });
   const [isUploading, setIsUploading] = useState(false);
-  const [showPreview, setShowPreview] = useState(false); // New state for preview mode
+  const [showPreview, setShowPreview] = useState(false); 
+  const [showVerification, setShowVerification] = useState(false);
 
   // Orders State
   const [myPurchases, setMyPurchases] = useState<Transaction[]>([]);
@@ -37,7 +38,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
   const [viewingOrder, setViewingOrder] = useState<Transaction | null>(null);
 
   // Chat State
-  const [showChat, setShowChat] = useState(false); // Controls chat panel visibility
+  const [showChat, setShowChat] = useState(false); 
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -61,7 +62,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
           loadConversations();
           const interval = setInterval(() => {
               if (activeConversation) loadMessages(activeConversation.id);
-              loadConversations(); // Update last messages list
+              loadConversations(); 
           }, 3000);
           return () => clearInterval(interval);
       }
@@ -119,7 +120,7 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
       const conv = await storageService.createConversation([user.id, targetUserId], names, gigId);
       setActiveConversation(conv);
       loadMessages(conv.id);
-      setSelectedGig(null); // Close modal if open
+      setSelectedGig(null);
       setSelectedSeller(null);
   };
 
@@ -127,7 +128,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
       if (!chatInput.trim() || !activeConversation) return;
       setIsSending(true);
 
-      // 1. AI SECURITY CHECK
       const riskAnalysis = await analyzeChatRisk(chatInput);
       
       if (riskAnalysis.isRisky) {
@@ -137,7 +137,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
           }
       }
 
-      // 2. Send Message
       const newMessage: ChatMessage = {
           id: Date.now().toString(),
           conversationId: activeConversation.id,
@@ -153,7 +152,23 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
       setIsSending(false);
   };
 
-  // Step 1: Validate and show Preview
+  // --- NEW: Human Verification Check ---
+  const handleSellClick = () => {
+      if (!user.isHuman) {
+          setShowVerification(true);
+      } else {
+          setActiveTab('create');
+      }
+  };
+
+  const handleVerificationSuccess = async () => {
+      setShowVerification(false);
+      const updatedUser = { ...user, isHuman: true };
+      await storageService.updateUser(updatedUser);
+      onUpdateUser(updatedUser);
+      setActiveTab('create');
+  };
+
   const handlePreviewListing = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGig.title || !newGig.description || !newGig.price || !newGig.secretDelivery) {
@@ -163,7 +178,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
     setShowPreview(true);
   };
 
-  // Step 2: Actually Create Gig
   const handleConfirmListing = async () => {
     let imageQuery = newGig.category;
     if (newGig.category === 'numbers') imageQuery = 'smartphone';
@@ -239,7 +253,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
          timestamp: Date.now()
        });
 
-       // Auto-start chat for the order
        handleStartChat(gig.sellerId, gig.sellerName, gig.id);
        setActiveTab('orders');
     }
@@ -259,11 +272,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
      }
   };
 
-  const handleSellerClick = (e: React.MouseEvent, sellerId: string, sellerName: string) => {
-      e.stopPropagation();
-      setSelectedSeller({ id: sellerId, name: sellerName });
-  };
-
   const categories = [
       { id: 'all', label: 'All Assets' },
       { id: 'numbers', label: 'Foreign Numbers' },
@@ -277,7 +285,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
   // --- CREATE FORM ---
   if (activeTab === 'create') {
     if (showPreview) {
-        // --- PREVIEW MODE ---
         return (
             <div className="max-w-3xl mx-auto animate-slide-up pb-20">
                 <div className="flex items-center justify-between mb-6">
@@ -340,7 +347,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
         );
     }
 
-    // --- EDIT MODE ---
     return (
       <div className="max-w-3xl mx-auto animate-slide-up pb-20">
          <div className="flex items-center justify-between mb-6">
@@ -367,7 +373,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1">Price ($)</label>
-                   {/* Changed min to 0 or any positive number */}
                    <Input type="number" min="0" step="0.01" value={newGig.price} onChange={e => setNewGig({...newGig, price: Number(e.target.value)})} required />
                  </div>
              </div>
@@ -398,7 +403,6 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                  />
              </div>
 
-             {/* Replaced URL input with File Upload */}
              <div>
                <label className="block text-sm font-medium mb-1">Asset Image (Screenshot/Photo)</label>
                <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-6 text-center bg-gray-50 dark:bg-gray-900/50 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800/50">
@@ -414,31 +418,17 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
                           </button>
                       </div>
                   ) : (
-                      <label className="cursor-pointer flex flex-col items-center justify-center space-y-2 group w-full h-full">
-                          <div className="p-3 bg-white dark:bg-gray-800 rounded-full text-indigo-500 shadow-sm group-hover:scale-110 transition-transform">
-                              <Upload className="w-6 h-6" />
-                          </div>
-                          <div>
-                              <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">Click to upload</span>
-                              <span className="text-sm text-gray-500 ml-1">from gallery</span>
-                          </div>
-                          <span className="text-xs text-gray-400">JPG, PNG (Max 5MB)</span>
-                          <input 
-                            type="file" 
-                            accept="image/*" 
-                            className="hidden" 
-                            onChange={handleImageUpload} 
-                          />
+                      <label className="cursor-pointer block h-full flex flex-col items-center justify-center">
+                          <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                          <span className="text-sm text-gray-500">Click to upload image</span>
+                          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                       </label>
                   )}
-                  {isUploading && <div className="mt-3 text-xs text-indigo-500 font-bold flex items-center justify-center"><div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping mr-2"></div>Uploading...</div>}
                </div>
+               {isUploading && <p className="text-xs text-indigo-500 mt-2 animate-pulse">Uploading image...</p>}
              </div>
 
-             <div className="flex justify-end space-x-3 pt-4 border-t dark:border-gray-700">
-               <Button type="button" variant="ghost" onClick={() => setActiveTab('market')}>Cancel</Button>
-               <Button type="submit" size="lg" disabled={isUploading}>Preview Listing</Button>
-             </div>
+             <Button type="submit" className="w-full" disabled={isUploading}>Review Listing</Button>
            </form>
         </Card>
       </div>
@@ -448,393 +438,211 @@ const GigsView: React.FC<GigsViewProps> = ({ user, onUpdateUser }) => {
   // --- ORDERS TAB ---
   if (activeTab === 'orders') {
       return (
-          <div className="space-y-8 animate-fade-in pb-20">
-              <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold">My Orders & Sales</h2>
-                  <Button variant="outline" onClick={() => setActiveTab('market')}>
-                      Back to Market
-                  </Button>
+          <div className="space-y-6 animate-fade-in pb-20">
+              <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold">Your Orders</h2>
+                  <Button variant="ghost" onClick={() => setActiveTab('market')}>Back to Market</Button>
               </div>
-              
-              {/* Similar to previous, but add Chat Button */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  {/* BUYER SIDE */}
-                  <div>
-                      <h3 className="font-bold text-lg mb-4 text-indigo-600">Purchases</h3>
-                      <div className="space-y-4">
-                          {myPurchases.map(order => (
-                              <Card key={order.id} className="border-l-4 border-l-indigo-500">
-                                  <div className="flex justify-between mb-2">
-                                      <div className="font-bold">{order.details}</div>
-                                      <Badge color={order.status === 'completed' ? 'green' : 'yellow'}>{order.status}</Badge>
-                                  </div>
-                                  <div className="flex justify-between items-center">
-                                      <div className="font-bold text-red-600">-${order.amount.toFixed(2)}</div>
-                                      <div className="flex space-x-2">
-                                         {/* Find original gig to know seller */}
-                                         {(() => {
-                                             const g = gigs.find(g => g.id === order.relatedGigId);
-                                             return g ? (
-                                                <Button size="sm" variant="ghost" onClick={() => handleStartChat(g.sellerId, g.sellerName, g.id)}>
-                                                    <MessageCircle className="w-4 h-4" />
-                                                </Button>
-                                             ) : null;
-                                         })()}
-                                         {order.status === 'completed' && (
-                                            <Button size="sm" onClick={() => setViewingOrder(order)}>
-                                                <Eye className="w-4 h-4 mr-1"/> Secret
-                                            </Button>
-                                         )}
-                                      </div>
-                                  </div>
-                              </Card>
-                          ))}
-                      </div>
-                  </div>
 
-                  {/* SELLER SIDE */}
-                  <div>
-                      <h3 className="font-bold text-lg mb-4 text-green-600">Sales</h3>
-                       <div className="space-y-4">
-                          {mySales.map(sale => (
-                              <Card key={sale.id} className="border-l-4 border-l-green-500">
-                                  <div className="flex justify-between mb-2">
-                                      <div className="font-bold">{sale.details}</div>
-                                      <Badge color={sale.status === 'completed' ? 'green' : 'red'}>{sale.status}</Badge>
-                                  </div>
-                                  <div className="flex justify-between items-center mt-3">
-                                      <div className="text-sm">Earn: ${(sale.amount * 0.7).toFixed(2)}</div>
-                                      <div className="flex space-x-2">
-                                         <Button size="sm" variant="ghost" onClick={() => handleStartChat(sale.userId, sale.userName, sale.relatedGigId)}>
-                                             <MessageCircle className="w-4 h-4" />
-                                         </Button>
-                                         {sale.status === 'pending_delivery' && (
-                                              <Button size="sm" onClick={() => handleReleaseOrder(sale.id)}>
-                                                  <CheckCircle className="w-4 h-4 mr-2"/> Release
-                                              </Button>
-                                         )}
-                                      </div>
-                                  </div>
-                              </Card>
-                          ))}
-                      </div>
-                  </div>
+              {/* BUYING */}
+              <div className="space-y-4">
+                  <h3 className="font-bold text-gray-500 uppercase tracking-wider text-sm flex items-center"><ShoppingBag className="w-4 h-4 mr-2"/> Buying ({myPurchases.length})</h3>
+                  {myPurchases.length === 0 && <p className="text-gray-400 italic text-sm">No active purchases.</p>}
+                  {myPurchases.map(p => (
+                      <Card key={p.id} className="flex justify-between items-center p-4">
+                          <div>
+                              <div className="font-bold">{p.details.replace('Order: ', '')}</div>
+                              <div className="text-xs text-gray-500">{new Date(p.timestamp).toLocaleDateString()}</div>
+                              <Badge color={p.status === 'completed' ? 'green' : 'yellow'} className="mt-1">{p.status === 'completed' ? 'Delivered' : 'Pending Delivery'}</Badge>
+                          </div>
+                          <div className="text-right">
+                              <div className="font-bold mb-2">-${p.amount}</div>
+                              {p.status === 'completed' ? (
+                                  <Button size="sm" variant="outline" disabled>Completed</Button>
+                              ) : (
+                                  <Button size="sm" onClick={() => {
+                                      const gig = gigs.find(g => g.id === p.relatedGigId);
+                                      if(gig) handleStartChat(gig.sellerId, gig.sellerName, gig.id);
+                                  }}>Contact Seller</Button>
+                              )}
+                          </div>
+                      </Card>
+                  ))}
+              </div>
+
+              {/* SELLING */}
+              <div className="space-y-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+                  <h3 className="font-bold text-gray-500 uppercase tracking-wider text-sm flex items-center"><Package className="w-4 h-4 mr-2"/> Selling ({mySales.length})</h3>
+                  {mySales.length === 0 && <p className="text-gray-400 italic text-sm">No active sales.</p>}
+                  {mySales.map(s => (
+                      <Card key={s.id} className="flex justify-between items-center p-4 bg-indigo-50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-800">
+                          <div>
+                              <div className="font-bold">{s.details.replace('Order: ', '')}</div>
+                              <div className="text-xs text-gray-500">Buyer: {s.userName}</div>
+                              <Badge color={s.status === 'completed' ? 'green' : 'yellow'} className="mt-1">{s.status === 'completed' ? 'Completed' : 'Action Required'}</Badge>
+                          </div>
+                          <div className="text-right">
+                              <div className="font-bold text-green-600 mb-2">+${s.amount}</div>
+                              {s.status === 'pending_delivery' && (
+                                  <Button size="sm" onClick={() => handleReleaseOrder(s.id)}>Release Item</Button>
+                              )}
+                          </div>
+                      </Card>
+                  ))}
               </div>
           </div>
-      )
+      );
   }
 
-  // --- MARKET VIEW ---
+  // --- MARKET TAB ---
   return (
-    <div className="space-y-6 animate-fade-in pb-20 relative">
+    <div className="space-y-6 animate-fade-in pb-20">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center text-gray-900 dark:text-white">
-             <ShoppingBag className="w-8 h-8 mr-3 text-indigo-600"/> Asset Market
-          </h1>
-          <p className="text-gray-500 mt-1">Securely buy and sell foreign numbers, accounts, and services.</p>
-        </div>
-        <div className="flex space-x-3">
-            <Button variant="outline" onClick={() => setShowChat(true)}>
-                <MessageCircle className="w-4 h-4 mr-2"/> Messages
-            </Button>
-            <Button variant="outline" onClick={() => setActiveTab('orders')}>
-                <Package className="w-4 h-4 mr-2"/> My Orders
-            </Button>
-            <Button onClick={() => setActiveTab('create')}>
-                <Plus className="w-4 h-4 mr-2" /> Sell
-            </Button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
-         <div className="flex-1 relative">
-             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-             <Input 
-                 placeholder="Search assets..." 
-                 value={searchTerm}
-                 onChange={e => setSearchTerm(e.target.value)}
-                 className="pl-9 h-11"
-             />
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+         <div>
+            <h1 className="text-2xl font-bold flex items-center">
+                <ShoppingBag className="w-6 h-6 mr-2 text-indigo-500"/> Marketplace
+            </h1>
+            <p className="text-gray-500 text-sm">Buy & Sell Social Media Assets securely.</p>
          </div>
-         <div className="flex space-x-2">
-             <Select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)} className="w-48 h-11">
-                 {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-             </Select>
-             <Select value={sortBy} onChange={e => setSortBy(e.target.value as any)} className="w-40 h-11">
-                 <option value="newest">Newest</option>
-                 <option value="price_asc">Price: Low</option>
-                 <option value="price_desc">Price: High</option>
-             </Select>
+         <div className="flex gap-2 w-full md:w-auto">
+             <Button onClick={() => setActiveTab('orders')} variant="outline" className="flex-1 md:flex-none">
+                 My Orders
+             </Button>
+             <Button onClick={handleSellClick} className="flex-1 md:flex-none bg-indigo-600 text-white">
+                 <Plus className="w-4 h-4 mr-2" /> Sell Asset
+             </Button>
          </div>
       </div>
 
-      {/* Gigs Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-        {filteredGigs.map(gig => (
-          <div key={gig.id} className="bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:border-indigo-500/30 transition-all group cursor-pointer flex flex-col h-full" onClick={() => setSelectedGig(gig)}>
-             <div className="relative h-48 overflow-hidden bg-gray-100 dark:bg-gray-900">
-                <img src={gig.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" alt={gig.title} />
-                <div className="absolute top-2 left-2">
-                    <Badge color="blue" className="shadow-md">
-                        {categories.find(c => c.id === gig.category)?.label || gig.category}
-                    </Badge>
-                </div>
-                <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-white text-xs font-bold flex items-center">
-                    <ShieldCheck className="w-3 h-3 mr-1 text-green-400"/> Secure
-                </div>
-             </div>
-             <div className="p-4 flex flex-col flex-1">
-                <div className="flex items-center justify-between mb-2">
-                   <div className="flex items-center space-x-2">
-                       <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">
-                          {gig.sellerName.charAt(0)}
-                       </div>
-                       <span className="text-xs text-gray-500 truncate">{gig.sellerName}</span>
-                   </div>
-                   <div className="flex items-center text-xs text-yellow-500 font-bold">
-                      <Star className="w-3 h-3 fill-current mr-1" />{gig.rating?.toFixed(1)}
-                   </div>
-                </div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 text-sm mb-2 line-clamp-2 leading-snug flex-1 group-hover:text-indigo-600 transition-colors">
-                    {gig.title}
-                </h3>
-                <div className="pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between mt-auto">
-                    <div className="text-lg font-black text-gray-900 dark:text-white">${gig.price}</div>
-                    <div className="flex space-x-2">
-                        <Button 
-                            size="sm" 
-                            variant="ghost"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedGig(gig);
-                            }}
-                        >
-                            View
-                        </Button>
-                        <Button 
-                            size="sm" 
-                            className="px-4 font-bold shadow-md bg-green-600 hover:bg-green-700"
-                            disabled={user.id === gig.sellerId}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handlePurchase(gig);
-                            }}
-                        >
-                            {user.id === gig.sellerId ? 'Yours' : 'Buy'}
-                        </Button>
-                    </div>
-                </div>
-             </div>
-          </div>
-        ))}
-      </div>
-
-      {/* --- SELLER PROFILE MODAL --- */}
-      <Modal 
-         isOpen={!!selectedSeller} 
-         onClose={() => setSelectedSeller(null)} 
-         title="Seller Profile"
-         maxWidth="max-w-4xl"
-      >
-         {selectedSeller && (
-             <div className="space-y-6">
-                 <div className="flex items-center space-x-4">
-                     <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-2xl text-white font-bold">
-                         {selectedSeller.name.charAt(0)}
-                     </div>
-                     <div>
-                         <h3 className="text-xl font-bold">{selectedSeller.name}</h3>
-                         <Button size="sm" variant="outline" className="mt-2" onClick={() => handleStartChat(selectedSeller.id, selectedSeller.name)}>
-                             <MessageCircle className="w-4 h-4 mr-2"/> Chat with Seller
-                         </Button>
-                     </div>
-                 </div>
-                 <div className="border-t border-gray-100 dark:border-gray-700 pt-6">
-                     <h4 className="font-bold mb-4">Active Listings</h4>
-                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                         {gigs.filter(g => g.sellerId === selectedSeller.id).map(g => (
-                             <div key={g.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 flex space-x-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer" onClick={() => { setSelectedGig(g); setSelectedSeller(null); }}>
-                                 <img src={g.image} className="w-16 h-16 object-cover rounded" />
-                                 <div>
-                                     <div className="font-bold text-sm line-clamp-1">{g.title}</div>
-                                     <div className="text-green-600 font-bold text-sm">${g.price}</div>
-                                 </div>
-                             </div>
-                         ))}
-                     </div>
-                 </div>
-             </div>
-         )}
-      </Modal>
-
-      {/* --- GIG DETAILS MODAL --- */}
-      <Modal isOpen={!!selectedGig} onClose={() => setSelectedGig(null)} title="Details" maxWidth="max-w-2xl">
-          {selectedGig && (
-              <div className="space-y-6">
-                  <div className="relative h-64 w-full rounded-xl overflow-hidden shadow-inner">
-                      <img src={selectedGig.image} className="w-full h-full object-cover" />
-                      <div className="absolute top-4 left-4">
-                          <Badge color="gray" className="shadow-lg text-sm capitalize">
-                            {categories.find(c => c.id === selectedGig.category)?.label || selectedGig.category}
-                          </Badge>
-                      </div>
-                  </div>
-                  <div className="flex justify-between items-start">
-                      <div>
-                          <h2 className="text-2xl font-bold mb-2 text-gray-900 dark:text-white">{selectedGig.title}</h2>
-                          <div className="flex items-center space-x-3 text-sm text-gray-500 mb-4">
-                              <span 
-                                className="font-medium text-indigo-600 cursor-pointer hover:underline"
-                                onClick={(e) => handleSellerClick(e, selectedGig.sellerId, selectedGig.sellerName)}
-                              >
-                                  {selectedGig.sellerName}
-                              </span>
-                              <span>•</span>
-                              <span className="flex items-center text-yellow-500"><Star className="w-3 h-3 fill-current mr-1"/> {selectedGig.rating?.toFixed(1)}</span>
-                          </div>
-                      </div>
-                      <div className="text-3xl font-black text-green-600">${selectedGig.price}</div>
-                  </div>
-                  <div className="bg-gray-50 dark:bg-gray-700/30 p-5 rounded-xl border border-gray-100 dark:border-gray-700">
-                      <p className="text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-line text-sm">
-                          {selectedGig.description}
-                      </p>
-                  </div>
-                  <div className="flex space-x-3 pt-4 border-t border-gray-100 dark:border-gray-700">
-                      <Button variant="outline" className="flex-1" onClick={() => handleStartChat(selectedGig.sellerId, selectedGig.sellerName, selectedGig.id)}>
-                          <MessageCircle className="w-4 h-4 mr-2"/> Message Seller
-                      </Button>
-                      <Button className="flex-1" onClick={() => handlePurchase(selectedGig)}>
-                          Buy Now (${selectedGig.price})
-                      </Button>
-                  </div>
+      {/* Verification Warning for Sellers */}
+      {!user.isHuman && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-xl flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-blue-600 mt-0.5" />
+              <div>
+                  <h4 className="font-bold text-blue-800 dark:text-blue-300 text-sm">Seller Verification Required</h4>
+                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                      To maintain a safe marketplace, you must verify you are human before listing items.
+                  </p>
               </div>
-          )}
-      </Modal>
-
-      {/* --- CREDENTIAL REVEAL MODAL --- */}
-      <Modal isOpen={!!viewingOrder} onClose={() => setViewingOrder(null)} title="Secure Asset Delivery">
-          {viewingOrder && (
-              <div className="space-y-6">
-                  <div className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 p-4 rounded-xl flex items-center">
-                      <CheckCircle className="w-6 h-6 mr-3" />
-                      <div>
-                          <div className="font-bold">Transaction Complete</div>
-                          <div className="text-sm">The seller has released the details.</div>
-                      </div>
-                  </div>
-                  <div>
-                      <h4 className="font-bold mb-2 flex items-center">
-                          <Lock className="w-4 h-4 mr-2 text-indigo-500"/> Credentials / Secret Info
-                      </h4>
-                      <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm whitespace-pre-wrap break-all border border-gray-700 shadow-inner">
-                          {(() => {
-                              const originalGig = gigs.find(g => g.id === viewingOrder.relatedGigId);
-                              return originalGig?.secretDelivery || "Error retrieving secret. Please contact support.";
-                          })()}
-                      </div>
-                  </div>
-                  <Button className="w-full" onClick={() => setViewingOrder(null)}>Close</Button>
-              </div>
-          )}
-      </Modal>
-
-      {/* --- FLOATING SECURE CHAT INTERFACE --- */}
-      {showChat && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white dark:bg-gray-800 w-full max-w-4xl h-[600px] rounded-2xl shadow-2xl flex overflow-hidden border border-gray-200 dark:border-gray-700">
-                  {/* Left: Conversations List */}
-                  <div className="w-1/3 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-900/50">
-                      <div className="p-4 border-b border-gray-200 dark:border-gray-700 font-bold flex justify-between items-center">
-                          <span>Messages</span>
-                          <ShieldCheck className="w-4 h-4 text-green-500" title="Secure Chat"/>
-                      </div>
-                      <div className="flex-1 overflow-y-auto">
-                          {conversations.length === 0 && <p className="text-center p-4 text-gray-500 text-sm">No conversations yet.</p>}
-                          {conversations.map(conv => {
-                              const otherName = Object.entries(conv.participantNames).find(([id]) => id !== user.id)?.[1] || 'User';
-                              return (
-                                  <div 
-                                    key={conv.id} 
-                                    onClick={() => { setActiveConversation(conv); loadMessages(conv.id); }}
-                                    className={`p-4 border-b border-gray-100 dark:border-gray-800 cursor-pointer hover:bg-white dark:hover:bg-gray-800 transition-colors ${activeConversation?.id === conv.id ? 'bg-white dark:bg-gray-800 border-l-4 border-l-indigo-600' : ''}`}
-                                  >
-                                      <div className="font-bold text-sm mb-1">{otherName}</div>
-                                      <div className="text-xs text-gray-500 truncate">{conv.lastMessage || 'Start chatting...'}</div>
-                                  </div>
-                              );
-                          })}
-                      </div>
-                  </div>
-
-                  {/* Right: Active Chat */}
-                  <div className="flex-1 flex flex-col bg-white dark:bg-gray-800">
-                      {activeConversation ? (
-                          <>
-                             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900/30">
-                                 <div>
-                                     <div className="font-bold">{Object.entries(activeConversation.participantNames).find(([id]) => id !== user.id)?.[1]}</div>
-                                     <div className="text-xs text-green-600 flex items-center"><ShieldCheck className="w-3 h-3 mr-1"/> End-to-End Encrypted & AI Monitored</div>
-                                 </div>
-                                 <button onClick={() => setShowChat(false)} className="text-gray-400 hover:text-red-500"><X className="w-5 h-5"/></button>
-                             </div>
-                             
-                             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                                 {chatMessages.map(msg => (
-                                     <div key={msg.id} className={`flex ${msg.senderId === user.id ? 'justify-end' : 'justify-start'}`}>
-                                         <div className={`max-w-[70%] rounded-2xl p-3 text-sm ${
-                                             msg.senderId === user.id 
-                                             ? 'bg-indigo-600 text-white rounded-br-none' 
-                                             : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'
-                                         }`}>
-                                             {msg.isFlagged && (
-                                                 <div className="text-xs text-yellow-300 font-bold mb-1 flex items-center">
-                                                     <ShieldAlert className="w-3 h-3 mr-1"/> Flagged by System
-                                                 </div>
-                                             )}
-                                             {msg.text}
-                                             <div className={`text-[10px] mt-1 text-right ${msg.senderId === user.id ? 'text-indigo-200' : 'text-gray-400'}`}>
-                                                 {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                             </div>
-                                         </div>
-                                     </div>
-                                 ))}
-                                 <div ref={chatEndRef} />
-                             </div>
-
-                             <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
-                                 <div className="flex space-x-2">
-                                     <Input 
-                                         value={chatInput} 
-                                         onChange={e => setChatInput(e.target.value)} 
-                                         onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
-                                         placeholder="Type a secure message..."
-                                         disabled={isSending}
-                                     />
-                                     <Button onClick={handleSendMessage} disabled={isSending || !chatInput.trim()}>
-                                         <Send className="w-4 h-4" />
-                                     </Button>
-                                 </div>
-                                 <div className="text-[10px] text-gray-400 mt-2 text-center flex items-center justify-center">
-                                     <Lock className="w-3 h-3 mr-1"/> Never share passwords or pay outside SocialPay. AI protection active.
-                                 </div>
-                             </div>
-                          </>
-                      ) : (
-                          <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-                              <MessageCircle className="w-16 h-16 mb-4 opacity-20"/>
-                              <p>Select a conversation to start chatting</p>
-                              <Button variant="outline" className="mt-4" onClick={() => setShowChat(false)}>Close</Button>
-                          </div>
-                      )}
-                  </div>
-              </div>
+              <Button size="sm" onClick={() => setShowVerification(true)} className="ml-auto">Verify Now</Button>
           </div>
       )}
 
+      {/* Filters */}
+      <div className="flex flex-col md:flex-row gap-4">
+          <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+              <input 
+                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                placeholder="Search assets..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+              />
+          </div>
+          <select 
+            className="p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg outline-none"
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as any)}
+          >
+              <option value="newest">Newest First</option>
+              <option value="price_asc">Price: Low to High</option>
+              <option value="price_desc">Price: High to Low</option>
+              <option value="rating">Highest Rated</option>
+          </select>
+      </div>
+
+      {/* Categories */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+          {categories.map(cat => (
+              <button 
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${selectedCategory === cat.id ? 'bg-indigo-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+              >
+                  {cat.label}
+              </button>
+          ))}
+      </div>
+
+      {/* Listings Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredGigs.map(gig => (
+              <Card key={gig.id} className="group hover:shadow-lg transition-all duration-300 border border-gray-100 dark:border-gray-800 overflow-hidden">
+                  <div className="relative h-48 bg-gray-100 dark:bg-gray-900 overflow-hidden">
+                      <img src={gig.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      <div className="absolute top-2 right-2 bg-white/90 dark:bg-black/80 backdrop-blur px-2 py-1 rounded text-xs font-bold shadow-sm">
+                          {categories.find(c => c.id === gig.category)?.label}
+                      </div>
+                  </div>
+                  <div className="p-4">
+                      <div className="flex justify-between items-start mb-2">
+                          <h3 className="font-bold text-lg line-clamp-1 group-hover:text-indigo-600 transition-colors">{gig.title}</h3>
+                          <div className="flex items-center text-xs bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded">
+                              <Star className="w-3 h-3 mr-1 fill-yellow-500 text-yellow-500" /> {gig.rating?.toFixed(1)}
+                          </div>
+                      </div>
+                      <p className="text-gray-500 text-sm line-clamp-2 mb-4 h-10">{gig.description}</p>
+                      
+                      <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-700">
+                          <div className="flex items-center space-x-2">
+                              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center text-white text-xs font-bold">
+                                  {gig.sellerName[0]}
+                              </div>
+                              <span className="text-xs text-gray-500 truncate max-w-[80px]">{gig.sellerName}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                              <span className="font-black text-lg text-gray-900 dark:text-white">${gig.price}</span>
+                              <Button size="sm" onClick={() => handlePurchase(gig)}>Buy</Button>
+                          </div>
+                      </div>
+                  </div>
+              </Card>
+          ))}
+          {filteredGigs.length === 0 && (
+              <div className="col-span-full text-center py-20 text-gray-500">
+                  <ShoppingBag className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                  <p>No listings found. Try adjusting filters.</p>
+              </div>
+          )}
+      </div>
+
+      {/* --- CHAT MODAL --- */}
+      <Modal isOpen={showChat} onClose={() => setShowChat(false)} title="Messages" maxWidth="max-w-md">
+          <div className="flex flex-col h-[500px]">
+              <div className="flex-1 overflow-y-auto space-y-4 p-2">
+                  {chatMessages.length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Start the conversation...</p>}
+                  {chatMessages.map(msg => (
+                      <div key={msg.id} className={`flex flex-col ${msg.senderId === user.id ? 'items-end' : 'items-start'}`}>
+                          <div className={`max-w-[80%] rounded-xl p-3 text-sm ${msg.senderId === user.id ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'}`}>
+                              {msg.text}
+                          </div>
+                          {msg.isFlagged && <span className="text-[10px] text-red-500 flex items-center mt-1"><ShieldAlert className="w-3 h-3 mr-1"/> Flagged for review</span>}
+                          <span className="text-[10px] text-gray-400 mt-1">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                      </div>
+                  ))}
+                  <div ref={chatEndRef} />
+              </div>
+              <div className="pt-3 mt-2 border-t border-gray-100 dark:border-gray-700 flex gap-2">
+                  <Input 
+                    placeholder="Type a message..." 
+                    value={chatInput} 
+                    onChange={e => setChatInput(e.target.value)} 
+                    onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
+                  />
+                  <Button onClick={handleSendMessage} disabled={!chatInput.trim() || isSending}>
+                      <Send className="w-4 h-4" />
+                  </Button>
+              </div>
+          </div>
+      </Modal>
+
+      {/* --- VERIFICATION MODAL --- */}
+      <HumanVerificationModal 
+          isOpen={showVerification} 
+          onClose={() => setShowVerification(false)} 
+          onSuccess={handleVerificationSuccess} 
+      />
     </div>
   );
 };

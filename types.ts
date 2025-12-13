@@ -1,7 +1,4 @@
 
-
-
-
 export type Role = 'creator' | 'engager' | 'admin';
 
 export type Platform = 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'linkedin';
@@ -9,6 +6,14 @@ export type Platform = 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'linkedi
 export type TaskType = 'like' | 'comment' | 'follow' | 'share' | 'view';
 
 export type VerificationStatus = 'unpaid' | 'pending' | 'verified' | 'rejected';
+
+export interface Certificate {
+  id: string;
+  title: string;
+  description: string;
+  issuedAt: number;
+  theme: 'gold' | 'silver' | 'bronze' | 'platinum';
+}
 
 export interface User {
   id: string;
@@ -26,6 +31,8 @@ export interface User {
   following: string[];
   totalViews?: number;
   totalLikes?: number;
+  isHuman?: boolean; // New field for seller verification
+  certificates?: Certificate[]; // New field for certificate engine
 }
 
 export interface Campaign {
@@ -36,7 +43,7 @@ export interface Campaign {
   type: TaskType;
   title: string;
   description: string;
-  targetUrl?: string; // Added target URL
+  targetUrl?: string;
   rewardPerTask: number;
   totalBudget: number;
   remainingBudget: number;
@@ -66,8 +73,8 @@ export interface Transaction {
   method: string;
   details: string;
   timestamp: number;
-  relatedGigId?: string; // Links transaction to a specific gig
-  relatedGigSecret?: string; // Stores the secret snapshot if needed
+  relatedGigId?: string;
+  relatedGigSecret?: string;
 }
 
 export interface Notification {
@@ -118,8 +125,8 @@ export interface Draft {
 
 export interface Conversation {
     id: string;
-    participants: string[]; // User IDs
-    participantNames: Record<string, string>; // ID -> Name mapping for easy lookup
+    participants: string[];
+    participantNames: Record<string, string>;
     lastMessage: string;
     lastMessageTime: number;
     relatedGigId?: string;
@@ -131,7 +138,7 @@ export interface ChatMessage {
     senderId: string;
     text: string;
     timestamp: number;
-    isFlagged?: boolean; // True if AI detects fraud/scam attempt
+    isFlagged?: boolean;
 }
 
 export interface Gig {
@@ -143,7 +150,7 @@ export interface Gig {
   price: number;
   category: 'graphics' | 'video' | 'writing' | 'marketing' | 'numbers' | 'social_accounts' | 'email_accounts';
   image: string;
-  secretDelivery?: string; // The sensitive data (login/codes) revealed after purchase
+  secretDelivery?: string;
   timestamp: number;
   rating?: number;
   ratingCount?: number;
@@ -171,7 +178,7 @@ export interface CommunityPost {
   comments: number;
   commentsList?: CommunityComment[];
   timestamp: number;
-  likedBy: string[]; // User IDs
+  likedBy: string[];
 }
 
 export interface MusicTrack {
@@ -183,11 +190,9 @@ export interface MusicTrack {
   audioUrl: string;
   genre: string;
   plays: number;
-  price: number; // Pay per play to artist
+  price: number;
   createdAt: number;
 }
-
-// --- DIGITAL MARKET TYPES ---
 
 export type DigitalCategory = 
   | 'architecture' 
@@ -214,16 +219,16 @@ export interface Storefront {
 
 export interface DigitalProduct {
   id: string;
-  storeId: string; // Links to Storefront
+  storeId: string;
   ownerId: string;
   title: string;
   description: string;
   price: number;
   category: DigitalCategory;
-  subCategory?: MechanicalSubCategory; // Specifically for mechanical
+  subCategory?: MechanicalSubCategory;
   thumbnailUrl: string;
-  fileUrl: string; // The downloadable asset
-  fileType: string; // e.g., 'pdf', 'cad', 'png', 'zip'
+  fileUrl: string;
+  fileType: string;
   previewImages?: string[];
   createdAt: number;
   sales: number;

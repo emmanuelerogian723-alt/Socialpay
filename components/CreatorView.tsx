@@ -1,19 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
-import { Plus, TrendingUp, Users, Eye, PlayCircle, Sparkles, Wallet, Camera, Upload, Trophy, LayoutDashboard, User as UserIcon } from 'lucide-react';
-import { Campaign, User, TaskType, Platform, Transaction } from '../types';
-import { Card, Button, Input, Select, Badge, Modal, BankDetails } from './UIComponents';
+import { Plus, TrendingUp, Users, Eye, PlayCircle, Sparkles, Wallet, Camera, Upload, Trophy, LayoutDashboard, User as UserIcon, Award } from 'lucide-react';
+import { Campaign, User, TaskType, Platform, Transaction, Certificate } from '../types';
+import { Card, Button, Input, Select, Badge, Modal, BankDetails, CertificateCard } from './UIComponents';
 import { generateCampaignInsights } from '../services/geminiService';
 import { storageService } from '../services/storageService';
-import { usePaystackPayment } from 'react-paystack';
 
 interface CreatorViewProps {
   user: User;
   onUpdateUser: (u: User) => void;
 }
-
-// REPLACE WITH YOUR ACTUAL PUBLIC KEY
-const PAYSTACK_PUBLIC_KEY = 'pk_test_392323232323232323232323232323'; 
 
 const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
   const [view, setView] = useState<'dashboard' | 'create' | 'profile'>('dashboard');
@@ -23,43 +19,29 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
   
-  // Paystack Configuration
+  // Paystack Configuration (Updated to External Link)
   const exchangeRate = 1500; // 1 USD = 1500 NGN
-  const depositKobo = depositAmount ? parseFloat(depositAmount) * exchangeRate * 100 : 0;
   
-  const depositConfig = {
-      reference: (new Date()).getTime().toString(),
-      email: user.email,
-      amount: depositKobo,
-      publicKey: PAYSTACK_PUBLIC_KEY,
-  };
-  
-  const initializeDeposit = usePaystackPayment(depositConfig);
-
-  const onSuccessDeposit = async (reference: any) => {
+  const handleManualDepositConfirm = async () => {
       const amountUSD = parseFloat(depositAmount);
-      
+      if (!amountUSD || amountUSD <= 0) return alert("Enter valid amount");
+
       const tx: Transaction = {
-       id: reference.reference,
+       id: `dep_${Date.now()}`,
        userId: user.id,
        userName: user.name,
        amount: amountUSD,
        type: 'deposit',
-       status: 'completed',
-       method: 'Paystack Card',
-       details: `Wallet Deposit (Ref: ${reference.reference})`,
+       status: 'pending',
+       method: 'External/Paystack',
+       details: 'Deposit (Pending Admin Check)',
        timestamp: Date.now()
      };
-
      await storageService.createTransaction(tx);
      
-     const updatedUser = { ...user, balance: user.balance + amountUSD };
-     await storageService.updateUser(updatedUser);
-     onUpdateUser(updatedUser);
-
      setShowDepositModal(false);
      setDepositAmount('');
-     alert("Funds Added Successfully!");
+     alert("Deposit Reported! Admin will verify and credit your wallet shortly.");
   };
 
   useEffect(() => {
@@ -77,6 +59,24 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
     rewardPerTask: 0.10,
     totalBudget: 10.00
   });
+
+  const generateCertificate = async (type: 'creator' | 'vip') => {
+      // Simulate generation
+      setTimeout(async () => {
+          const newCert: Certificate = {
+              id: Date.now().toString(),
+              title: type === 'creator' ? 'Verified Creator' : 'VIP Partner',
+              description: type === 'creator' ? 'Official content partner of SocialPay.' : 'Top tier advertiser with proven track record.',
+              issuedAt: Date.now(),
+              theme: type === 'creator' ? 'bronze' : 'platinum'
+          };
+          
+          const updatedUser = { ...user, certificates: [...(user.certificates || []), newCert] };
+          await storageService.updateUser(updatedUser);
+          onUpdateUser(updatedUser);
+          alert("Certificate Generated!");
+      }, 1000);
+  };
 
   const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -443,6 +443,32 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
                 </div>
               </Card>
 
+              {/* Certificate Creator Engine */}
+              <div className="space-y-4 mb-6">
+                  <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-bold flex items-center"><Award className="w-5 h-5 mr-2 text-indigo-500"/> Certificate Engine</h3>
+                      {campaigns.reduce((acc, c) => acc + c.totalBudget, 0) > 100 && !user.certificates?.some(c => c.theme === 'platinum') && (
+                          <Button size="sm" onClick={() => generateCertificate('vip')}>Claim VIP</Button>
+                      )}
+                      {!user.certificates?.some(c => c.theme === 'bronze') && (
+                          <Button size="sm" variant="outline" onClick={() => generateCertificate('creator')}>Claim Creator</Button>
+                      )}
+                  </div>
+                  
+                  {(!user.certificates || user.certificates.length === 0) ? (
+                      <Card className="text-center p-8 bg-gray-50 dark:bg-gray-800/50">
+                          <Trophy className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                          <p className="text-gray-500 text-sm">No certificates earned yet. Run campaigns to unlock status.</p>
+                      </Card>
+                  ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {user.certificates.map(cert => (
+                              <CertificateCard key={cert.id} cert={cert} userName={user.name} />
+                          ))}
+                      </div>
+                  )}
+              </div>
+
               {/* Campaign Performance Section */}
               <Card className="mb-6">
                  <h3 className="font-bold mb-4 flex items-center">
@@ -523,10 +549,14 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
             
             <Button 
                 className="w-full bg-green-600 hover:bg-green-700 text-white" 
-                onClick={() => initializeDeposit(onSuccessDeposit, () => {})}
+                onClick={() => window.open('https://paystack.shop/pay/socialpay', '_blank')}
                 disabled={!depositAmount || parseFloat(depositAmount) <= 0}
             >
                Pay with Paystack
+            </Button>
+            <div className="text-center text-xs text-gray-500 my-2">- OR -</div>
+            <Button variant="outline" className="w-full" onClick={handleManualDepositConfirm} disabled={!depositAmount}>
+                I Have Paid (Notify Admin)
             </Button>
          </div>
       </Modal>

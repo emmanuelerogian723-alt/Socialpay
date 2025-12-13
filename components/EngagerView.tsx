@@ -1,20 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, DollarSign, ExternalLink, ShieldAlert, Trophy, Zap, History, Search, Upload, Lock, CreditCard, Banknote, AlertTriangle, Camera, Plus, Clock, Filter, ArrowUpDown, User as UserIcon, Mail } from 'lucide-react';
-import { Task, User, Transaction, Platform, TaskType } from '../types';
-import { Card, Button, Badge, Input, Select, Modal, BankDetails } from './UIComponents';
+import { CheckCircle, DollarSign, ExternalLink, ShieldAlert, Trophy, Zap, History, Search, Upload, Lock, CreditCard, Banknote, AlertTriangle, Camera, Plus, Clock, Filter, ArrowUpDown, User as UserIcon, Mail, Award, Download } from 'lucide-react';
+import { Task, User, Transaction, Platform, TaskType, Certificate } from '../types';
+import { Card, Button, Badge, Input, Select, Modal, BankDetails, CertificateCard } from './UIComponents';
 import { verifyEngagementProof } from '../services/geminiService';
 import { storageService } from '../services/storageService';
-import { usePaystackPayment } from 'react-paystack';
 
 interface EngagerViewProps {
   user: User;
   onUpdateUser: (u: User) => void;
   refreshTrigger: number;
 }
-
-// REPLACE WITH YOUR ACTUAL PUBLIC KEY
-const PAYSTACK_PUBLIC_KEY = 'pk_test_392323232323232323232323232323'; 
 
 const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTrigger }) => {
   const [activeTab, setActiveTab] = useState<'tasks' | 'wallet' | 'leaderboard' | 'profile'>('profile'); 
@@ -34,7 +30,6 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
   const [searchTerm, setSearchTerm] = useState('');
   const [filterPlatform, setFilterPlatform] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
-  const [minReward, setMinReward] = useState<string>('');
   const [sortBy, setSortBy] = useState<'newest' | 'reward_high' | 'reward_low'>('newest');
 
   // Load Data
@@ -71,6 +66,26 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     loadData();
   }, [refreshTrigger, user.id]);
 
+  const generateCertificate = async (type: 'earner' | 'milestone') => {
+      setIsProcessing(true);
+      // Simulate generation
+      setTimeout(async () => {
+          const newCert: Certificate = {
+              id: Date.now().toString(),
+              title: type === 'earner' ? 'Certified Earner' : 'Task Master',
+              description: type === 'earner' ? 'Verified active participant in the SocialPay ecosystem.' : 'Completed 100+ Tasks with high accuracy.',
+              issuedAt: Date.now(),
+              theme: type === 'earner' ? 'silver' : 'gold'
+          };
+          
+          const updatedUser = { ...user, certificates: [...(user.certificates || []), newCert] };
+          await storageService.updateUser(updatedUser);
+          onUpdateUser(updatedUser);
+          setIsProcessing(false);
+          alert("Certificate Generated!");
+      }, 1500);
+  };
+
   const handlePayEntryFeeManual = async () => {
     setIsProcessing(true);
     const feeTx: Transaction = {
@@ -80,7 +95,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
       amount: 1.00,
       type: 'fee',
       status: 'pending',
-      method: 'External/Bank',
+      method: 'External/Paystack',
       details: 'One-time access fee payment (Pending Approval)',
       timestamp: Date.now()
     };
@@ -382,7 +397,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
               </Card>
 
               {user.verificationStatus === 'unpaid' && (
-                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 flex items-center justify-between">
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 flex items-center justify-between mb-6">
                       <div className="flex items-center">
                           <AlertTriangle className="w-5 h-5 text-red-600 mr-3" />
                           <div>
@@ -393,6 +408,32 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
                       <Button size="sm" variant="danger" onClick={() => setActiveTab('wallet')}>Pay Now</Button>
                   </div>
               )}
+
+              {/* Certificate Creator Engine */}
+              <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-bold flex items-center"><Award className="w-5 h-5 mr-2 text-indigo-500"/> Certificate Engine</h3>
+                      {transactions.filter(t => t.type === 'earning').length > 50 && !user.certificates?.some(c => c.theme === 'gold') && (
+                          <Button size="sm" onClick={() => generateCertificate('milestone')} isLoading={isProcessing}>Claim Gold</Button>
+                      )}
+                      {!user.certificates?.some(c => c.theme === 'silver') && (
+                          <Button size="sm" variant="outline" onClick={() => generateCertificate('earner')} isLoading={isProcessing}>Claim Standard</Button>
+                      )}
+                  </div>
+                  
+                  {(!user.certificates || user.certificates.length === 0) ? (
+                      <Card className="text-center p-8 bg-gray-50 dark:bg-gray-800/50">
+                          <Trophy className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                          <p className="text-gray-500 text-sm">No certificates earned yet. Complete tasks to unlock!</p>
+                      </Card>
+                  ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {user.certificates.map(cert => (
+                              <CertificateCard key={cert.id} cert={cert} userName={user.name} />
+                          ))}
+                      </div>
+                  )}
+              </div>
           </div>
       )}
 
@@ -456,37 +497,27 @@ const WalletSection: React.FC<{
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
 
-  // Paystack Deposit
-  const exchangeRate = 1500;
-  const depositKobo = depositAmount ? parseFloat(depositAmount) * exchangeRate * 100 : 0;
-  const depositConfig = {
-      reference: (new Date()).getTime().toString(),
-      email: user.email,
-      amount: depositKobo,
-      publicKey: PAYSTACK_PUBLIC_KEY,
-  };
-  const initializeDeposit = usePaystackPayment(depositConfig);
-
-  const onSuccessDeposit = async (reference: any) => {
+  const handleManualDepositConfirm = async () => {
       const amountUSD = parseFloat(depositAmount);
+      if (!amountUSD || amountUSD <= 0) return alert("Enter valid amount");
+
       const tx: Transaction = {
-       id: reference.reference,
+       id: `dep_${Date.now()}`,
        userId: user.id,
        userName: user.name,
        amount: amountUSD,
        type: 'deposit',
-       status: 'completed',
-       method: 'Paystack Card',
-       details: `Wallet Deposit (Ref: ${reference.reference})`,
+       status: 'pending',
+       method: 'External/Paystack',
+       details: 'Deposit (Pending Admin Check)',
        timestamp: Date.now()
      };
      await storageService.createTransaction(tx);
-     const updatedUser = { ...user, balance: user.balance + amountUSD };
-     await storageService.updateUser(updatedUser);
-     onUpdateUser(updatedUser);
+     
+     // Don't update balance yet for deposit
      setShowDepositModal(false);
      setDepositAmount('');
-     alert("Deposit Successful!");
+     alert("Deposit Reported! Admin will verify and credit your wallet shortly.");
   };
 
   const handleWithdraw = async (e: React.FormEvent) => {
@@ -534,8 +565,8 @@ const WalletSection: React.FC<{
                  <div className="text-xs text-gray-500">{new Date(tx.timestamp).toLocaleDateString()}</div>
                </div>
                <div className="text-right">
-                  <div className={`font-bold ${tx.type === 'earning' ? 'text-green-600' : 'text-red-600'}`}>{tx.type === 'earning' ? '+' : '-'}${tx.amount.toFixed(2)}</div>
-                  <Badge color={tx.status === 'completed' ? 'green' : 'yellow'}>{tx.status}</Badge>
+                  <div className={`font-bold ${tx.type === 'earning' || tx.type === 'deposit' ? 'text-green-600' : 'text-red-600'}`}>{tx.type === 'earning' || tx.type === 'deposit' ? '+' : '-'}${tx.amount.toFixed(2)}</div>
+                  <Badge color={tx.status === 'completed' ? 'green' : tx.status === 'pending' ? 'yellow' : 'red'}>{tx.status}</Badge>
                </div>
             </div>
           ))}
@@ -545,8 +576,18 @@ const WalletSection: React.FC<{
       <Modal isOpen={showDepositModal} onClose={() => setShowDepositModal(false)} title="Add Funds">
          <div className="space-y-4">
             <Input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} placeholder="Amount ($)" />
-            <p className="text-xs text-gray-500">Approx: ₦{(parseFloat(depositAmount||'0')*exchangeRate).toLocaleString()}</p>
-            <Button className="w-full bg-green-600" onClick={() => initializeDeposit(onSuccessDeposit, ()=>{})} disabled={!depositAmount}>Pay with Paystack</Button>
+            <p className="text-xs text-gray-500">Approx: ₦{(parseFloat(depositAmount||'0')*1500).toLocaleString()}</p>
+            <Button 
+                className="w-full bg-green-600 hover:bg-green-700" 
+                onClick={() => window.open('https://paystack.shop/pay/socialpay', '_blank')} 
+                disabled={!depositAmount}
+            >
+                Pay with Paystack
+            </Button>
+            <div className="text-center text-xs text-gray-500 my-2">- OR -</div>
+            <Button variant="outline" className="w-full" onClick={handleManualDepositConfirm} disabled={!depositAmount}>
+                I Have Paid (Notify Admin)
+            </Button>
          </div>
       </Modal>
     </div>
