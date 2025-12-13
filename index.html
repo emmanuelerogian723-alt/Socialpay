@@ -32,6 +32,7 @@
               'fade-in': 'fadeIn 0.5s ease-out',
               'slide-up': 'slideUp 0.5s ease-out',
               'bounce-soft': 'bounceSoft 2s infinite',
+              'float': 'float 6s ease-in-out infinite',
             },
             keyframes: {
               fadeIn: {
@@ -45,6 +46,10 @@
               bounceSoft: {
                 '0%, 100%': { transform: 'translateY(-5%)' },
                 '50%': { transform: 'translateY(0)' },
+              },
+              float: {
+                '0%, 100%': { transform: 'translateY(0px) rotateX(0deg) rotateY(0deg)' },
+                '50%': { transform: 'translateY(-15px) rotateX(5deg) rotateY(5deg)' },
               }
             }
           }
@@ -71,6 +76,12 @@
       .dark .glass-effect {
         background: rgba(17, 24, 39, 0.7);
       }
+
+      /* 3D Transform Utilities */
+      .perspective-1000 { perspective: 1000px; }
+      .transform-style-3d { transform-style: preserve-3d; }
+      .backface-hidden { backface-visibility: hidden; }
+      .rotate-y-180 { transform: rotateY(180deg); }
     </style>
   <script type="importmap">
 {
