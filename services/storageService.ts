@@ -314,7 +314,7 @@ export const storageService = {
   },
   async createTransaction(tx: Transaction) {
       if(USE_SUPABASE) await supabase.from('transactions').insert([{
-          user_id: tx.userId, user_name: tx.userName, amount: tx.amount, type: tx.type, status: tx.status, method: tx.method, details: tx.details, timestamp: Date.now()
+          user_id: tx.userId, user_name: tx.userName, amount: tx.amount, type: tx.type, status: tx.status, method: tx.method, details: tx.details, timestamp: Date.now(), related_gig_id: tx.relatedGigId
       }]);
       else { const l = getLocal('transactions', []); if(!tx.id) tx.id=Date.now().toString(); l.unshift(tx); setLocal('transactions', l); }
   },
@@ -324,7 +324,7 @@ export const storageService = {
       } else {
           const l = getLocal<Transaction[]>('transactions', []);
           const t = l.find(x => x.id === id);
-          if(t) { t.status = status; setLocal('transactions', l); }
+          if(t) { t.status = status as any; setLocal('transactions', l); }
       }
   },
   async adminAdjustBalance(userId: string, amount: number, reason: string) {
@@ -375,17 +375,103 @@ export const storageService = {
   async getGigs(): Promise<Gig[]> {
       if(USE_SUPABASE) {
           const { data } = await supabase.from('gigs').select('*').order('timestamp', {ascending: false});
-          return (data || []).map((g: any) => ({...g, sellerId: g.seller_id, sellerName: g.seller_name}));
+          return (data || []).map((g: any) => ({...g, sellerId: g.seller_id, sellerName: g.seller_name, secretDelivery: g.secret_delivery}));
       }
       return getLocal('gigs', []);
   },
   async createGig(g: Gig) {
-      if(USE_SUPABASE) await supabase.from('gigs').insert([{ seller_id: g.sellerId, seller_name: g.sellerName, title: g.title, description: g.description, price: g.price, category: g.category, image: g.image, timestamp: Date.now() }]);
+      if(USE_SUPABASE) await supabase.from('gigs').insert([{ seller_id: g.sellerId, seller_name: g.sellerName, title: g.title, description: g.description, price: g.price, category: g.category, image: g.image, secret_delivery: g.secretDelivery, timestamp: Date.now() }]);
       else { const l = getLocal('gigs', []); l.unshift(g); setLocal('gigs', l); }
   },
   async deleteGig(id: string) {
       if(USE_SUPABASE) await supabase.from('gigs').delete().eq('id', id);
       else { const l = getLocal<Gig[]>('gigs', []); setLocal('gigs', l.filter(x=>x.id!==id)); }
+  },
+  // Specific Logic for Processing a Gig Order (Releasing funds with fee deduction)
+  async processGigOrder(transactionId: string): Promise<{success: boolean}> {
+      // Logic: 
+      // 1. Find transaction
+      // 2. Mark as completed
+      // 3. Find Gig -> Get seller
+      // 4. Calculate 70% of amount
+      // 5. Add 70% to seller's balance
+      // 6. Create earning record for seller
+      // 7. Create fee record for admin (implicit or explicit)
+
+      if(USE_SUPABASE) {
+          // This would typically be a Postgres Function/RPC for atomicity. 
+          // For now, client-side orchestration (not ideal for production but functional for demo).
+          const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single();
+          if(!tx) return {success: false};
+
+          const sellerEarnings = tx.amount * 0.70;
+          
+          // Get Gig to find Seller
+          const { data: gig } = await supabase.from('gigs').select('seller_id').eq('id', tx.related_gig_id).single();
+          if(!gig) return {success: false};
+
+          // Update Transaction
+          await supabase.from('transactions').update({status: 'completed'}).eq('id', transactionId);
+
+          // Update Seller Balance
+          const { data: seller } = await supabase.from('profiles').select('*').eq('id', gig.seller_id).single();
+          if(seller) {
+              await supabase.from('profiles').update({balance: seller.balance + sellerEarnings}).eq('id', gig.seller_id);
+              
+              // Create Earning Record for Seller
+              await supabase.from('transactions').insert([{
+                  user_id: seller.id,
+                  user_name: seller.name,
+                  amount: sellerEarnings,
+                  type: 'earning',
+                  status: 'completed',
+                  method: 'Gig Sale',
+                  details: `Sale: ${tx.details} (after 30% fee)`,
+                  timestamp: Date.now()
+              }]);
+          }
+          return {success: true};
+      } else {
+          // Local Storage Logic
+          const transactions = getLocal<Transaction[]>('transactions', []);
+          const txIndex = transactions.findIndex(t => t.id === transactionId);
+          if (txIndex === -1) return {success: false};
+          
+          const tx = transactions[txIndex];
+          const sellerEarnings = tx.amount * 0.70;
+
+          // Update Transaction
+          transactions[txIndex].status = 'completed';
+          setLocal('transactions', transactions);
+
+          // Find Gig
+          const gigs = getLocal<Gig[]>('gigs', []);
+          const gig = gigs.find(g => g.id === tx.relatedGigId);
+          if (!gig) return {success: false};
+
+          // Update Seller
+          const users = getLocal<User[]>('users', []);
+          const sellerIndex = users.findIndex(u => u.id === gig.sellerId);
+          if (sellerIndex !== -1) {
+              users[sellerIndex].balance += sellerEarnings;
+              setLocal('users', users);
+              
+              // Add Earning Transaction for Seller
+              transactions.unshift({
+                  id: Date.now().toString(),
+                  userId: users[sellerIndex].id,
+                  userName: users[sellerIndex].name,
+                  amount: sellerEarnings,
+                  type: 'earning',
+                  status: 'completed',
+                  method: 'Gig Sale',
+                  details: `Sale: ${tx.details} (after 30% fee)`,
+                  timestamp: Date.now()
+              } as any); // Cast because relatedGigId optional
+              setLocal('transactions', transactions);
+          }
+          return {success: true};
+      }
   },
 
   // Community

@@ -1,8 +1,6 @@
-
-
 import React, { useState, useEffect } from 'react';
 import { User, Notification } from '../types';
-import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe, Gamepad2, Music } from 'lucide-react';
+import { LayoutDashboard, Wallet, Briefcase, Settings, Menu, Bell, LogOut, Moon, Sun, PlayCircle, ShoppingBag, Globe, Gamepad2 } from 'lucide-react';
 import CreatorView from './components/CreatorView';
 import EngagerView from './components/EngagerView';
 import AdminView from './components/AdminView';
@@ -10,7 +8,6 @@ import ReelsView from './components/ReelsView';
 import GigsView from './components/GigsView';
 import CommunityView from './components/CommunityView';
 import GameCentreView from './components/GameCentreView';
-import MusicHubView from './components/MusicHubView';
 import SettingsView from './components/SettingsView';
 import LandingView from './components/LandingView';
 import { AuthView } from './components/AuthView';
@@ -18,7 +15,7 @@ import { ToastContainer } from './components/UIComponents';
 import { storageService } from './services/storageService';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 
-type ViewState = 'dashboard' | 'reels' | 'gigs' | 'community' | 'games' | 'music' | 'settings';
+type ViewState = 'dashboard' | 'reels' | 'gigs' | 'community' | 'games' | 'settings';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -162,7 +159,6 @@ const App: React.FC = () => {
           <NavItem icon={ShoppingBag} label="Gig Market" viewId="gigs" />
           <NavItem icon={Globe} label="Community" viewId="community" />
           <NavItem icon={Gamepad2} label="Game Centre" viewId="games" />
-          <NavItem icon={Music} label="Music Hub" viewId="music" />
           <div className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-6">Account</div>
           <NavItem icon={Settings} label="Settings" viewId="settings" />
         </div>
@@ -193,7 +189,7 @@ const App: React.FC = () => {
           
           <div className="flex-1 max-w-xl mx-4">
              <h2 className="text-lg font-semibold capitalize text-gray-700 dark:text-gray-200">
-               {currentView === 'gigs' ? 'Marketplace' : currentView === 'community' ? 'Community Feed' : currentView === 'games' ? 'Arcade' : currentView === 'music' ? 'Music Hub' : currentView}
+               {currentView === 'gigs' ? 'Marketplace' : currentView === 'community' ? 'Community Feed' : currentView === 'games' ? 'Arcade' : currentView}
              </h2>
           </div>
 
@@ -232,7 +228,6 @@ const App: React.FC = () => {
           {currentView === 'gigs' && <GigsView user={user} onUpdateUser={setUser} />}
           {currentView === 'community' && <CommunityView user={user} />}
           {currentView === 'games' && <GameCentreView user={user} onUpdateUser={setUser} />}
-          {currentView === 'music' && <MusicHubView user={user} />}
           {currentView === 'settings' && <SettingsView user={user} onUpdateUser={setUser} />}
         </div>
         

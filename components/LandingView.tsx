@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { PlayCircle, DollarSign, ShoppingBag, Gamepad2, Music, ArrowRight, ShieldCheck, Globe } from 'lucide-react';
+import { PlayCircle, DollarSign, ShoppingBag, Gamepad2, ArrowRight, ShieldCheck, Globe } from 'lucide-react';
 import { Button } from './UIComponents';
 
 interface LandingViewProps {
@@ -38,13 +37,6 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted }) => {
       icon: <Gamepad2 className="w-8 h-8 text-purple-400" />,
       color: "from-purple-500 to-violet-700",
       bg: "bg-purple-900/20"
-    },
-    {
-      title: "Music Hub",
-      desc: "Upload your tracks, get paid per stream, or create beats in our browser-based studio.",
-      icon: <Music className="w-8 h-8 text-cyan-400" />,
-      color: "from-cyan-500 to-teal-700",
-      bg: "bg-cyan-900/20"
     }
   ];
 
@@ -100,7 +92,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted }) => {
             {/* Feature Cards / Visual Guide */}
             <div className="lg:w-1/2 w-full relative">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {features.slice(0, 4).map((f, i) => (
+                    {features.map((f, i) => (
                         <div 
                             key={i}
                             className={`p-6 rounded-2xl border border-white/5 backdrop-blur-md transition-all duration-300 hover:-translate-y-2 cursor-pointer ${f.bg} hover:bg-opacity-30`}

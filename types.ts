@@ -59,11 +59,13 @@ export interface Transaction {
   userId: string;
   userName: string;
   amount: number;
-  type: 'earning' | 'withdrawal' | 'deposit' | 'fee' | 'adjustment' | 'purchase';
-  status: 'pending' | 'completed' | 'rejected';
+  type: 'earning' | 'withdrawal' | 'deposit' | 'fee' | 'adjustment' | 'purchase' | 'gig_sale';
+  status: 'pending' | 'completed' | 'rejected' | 'pending_delivery';
   method: string;
   details: string;
   timestamp: number;
+  relatedGigId?: string; // Links transaction to a specific gig
+  relatedGigSecret?: string; // Stores the secret snapshot if needed
 }
 
 export interface Notification {
@@ -127,8 +129,9 @@ export interface Gig {
   title: string;
   description: string;
   price: number;
-  category: 'graphics' | 'video' | 'writing' | 'marketing';
+  category: 'graphics' | 'video' | 'writing' | 'marketing' | 'numbers' | 'social_accounts' | 'email_accounts';
   image: string;
+  secretDelivery?: string; // The sensitive data (login/codes) revealed after purchase
   timestamp: number;
   rating?: number;
   ratingCount?: number;
