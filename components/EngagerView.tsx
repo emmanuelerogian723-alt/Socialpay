@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, DollarSign, ExternalLink, ShieldAlert, Trophy, Zap, History, Search, Upload, Lock, CreditCard, Banknote, AlertTriangle, Camera, Plus, Clock, Filter, ArrowUpDown } from 'lucide-react';
+import { CheckCircle, DollarSign, ExternalLink, ShieldAlert, Trophy, Zap, History, Search, Upload, Lock, CreditCard, Banknote, AlertTriangle, Camera, Plus, Clock, Filter, ArrowUpDown, User as UserIcon, Mail } from 'lucide-react';
 import { Task, User, Transaction, Platform, TaskType } from '../types';
 import { Card, Button, Badge, Input, Select, Modal, BankDetails } from './UIComponents';
 import { verifyEngagementProof } from '../services/geminiService';
@@ -17,14 +17,13 @@ interface EngagerViewProps {
 const PAYSTACK_PUBLIC_KEY = 'pk_test_392323232323232323232323232323'; 
 
 const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTrigger }) => {
-  const [activeTab, setActiveTab] = useState<'tasks' | 'wallet' | 'leaderboard' | 'profile'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'wallet' | 'leaderboard' | 'profile'>('profile'); // Default to profile if unpaid, else tasks? Let's keep logic simple.
   const [tasks, setTasks] = useState<Task[]>([]);
   const [verifyingTask, setVerifyingTask] = useState<Task | null>(null);
   const [proofText, setProofText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [verificationResult, setVerificationResult] = useState<{success: boolean, message: string} | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [showFeeModal, setShowFeeModal] = useState(false);
   
   // Verification Modal Inputs
   const [verifyHandle, setVerifyHandle] = useState('');
@@ -40,6 +39,11 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
 
   // Load Data
   useEffect(() => {
+    // If user is unpaid, default to profile view initially so they aren't confused by empty tasks
+    if (user.verificationStatus === 'unpaid' && activeTab === 'tasks') {
+        setActiveTab('profile');
+    }
+
     const loadData = async () => {
         try {
             const allCampaigns = await storageService.getCampaigns();
@@ -65,12 +69,7 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
         }
     };
     loadData();
-
-    // Check fee status - Show modal if unpaid, but allow dashboard if pending
-    if (user.role === 'engager' && user.verificationStatus === 'unpaid') {
-      setShowFeeModal(true);
-    }
-  }, [refreshTrigger, user.id, user.verificationStatus, user.role]);
+  }, [refreshTrigger, user.id]);
 
   // --- PAYSTACK INTEGRATION FOR FEE ---
   const feeAmountUSD = 1.00;
@@ -122,28 +121,10 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
       });
 
       setIsProcessing(false);
-      setShowFeeModal(false);
       alert("Payment Successful! Account Verified.");
+      setActiveTab('tasks');
   };
 
-  const onCloseFee = () => {
-      console.log('Payment closed');
-  };
-
-  // --- FILTERING & SORTING LOGIC ---
-  const filteredTasks = tasks.filter(task => {
-    const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesPlatform = filterPlatform === 'all' || task.platform === filterPlatform;
-    const matchesType = filterType === 'all' || task.type === filterType;
-    const matchesReward = !minReward || task.reward >= parseFloat(minReward);
-    return matchesSearch && matchesPlatform && matchesType && matchesReward;
-  }).sort((a, b) => {
-    if (sortBy === 'reward_high') return b.reward - a.reward;
-    if (sortBy === 'reward_low') return a.reward - b.reward;
-    return 0; 
-  });
-
-  // OLD MANUAL METHOD (Kept as fallback or reference, but UI now prioritizes Paystack)
   const handlePayEntryFeeManual = async () => {
     setIsProcessing(true);
     const feeTx: Transaction = {
@@ -164,15 +145,24 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     onUpdateUser(updatedUser);
     
     setIsProcessing(false);
-    setShowFeeModal(false);
-    alert("Payment reported! You can now access the dashboard while Admin verifies.");
+    alert("Payment reported! Dashboard unlocked (Read-Only Wallet).");
+  };
+
+  const handleProfileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      storageService.uploadMedia(file).then(async (url) => {
+        const updatedUser = { ...user, avatar: url };
+        await storageService.updateUser(updatedUser);
+        onUpdateUser(updatedUser);
+      });
+    }
   };
 
   const handleProofImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if(file) {
       setIsProcessing(true);
-      // Upload to Supabase Storage
       storageService.uploadMedia(file).then(url => {
           setVerifyImage(url);
           setIsProcessing(false);
@@ -185,18 +175,10 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
 
   const handleVerify = async () => {
     if (!verifyingTask) return;
-    
-    const proofContext = `
-      User Handle: ${verifyHandle}
-      Proof Link: ${verifyLink}
-      Additional Notes: ${proofText}
-      ${verifyImage ? '(User uploaded a screenshot)' : '(No screenshot)'}
-    `;
-
     setIsProcessing(true);
     setVerificationResult(null);
 
-    // Call AI Check
+    const proofContext = `User Handle: ${verifyHandle}\nProof Link: ${verifyLink}\nNotes: ${proofText}\n${verifyImage ? '(Screenshot uploaded)' : ''}`;
     const aiResult = await verifyEngagementProof(verifyingTask.title, verifyingTask.platform, proofContext);
 
     if (aiResult.isValid) {
@@ -204,7 +186,6 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
       
       const newBalance = user.balance + verifyingTask.reward;
       const updatedUser = { ...user, balance: newBalance, xp: user.xp + 50 };
-      
       await storageService.updateUser(updatedUser);
       onUpdateUser(updatedUser);
 
@@ -221,14 +202,10 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
       });
 
       setTasks(prev => prev.filter(t => t.id !== verifyingTask.id));
-      
-      setTimeout(() => {
-        closeVerifyModal();
-      }, 2000);
+      setTimeout(closeVerifyModal, 2000);
     } else {
       setVerificationResult({ success: false, message: `Verification Failed: ${aiResult.reason}` });
     }
-    
     setIsProcessing(false);
   };
 
@@ -241,21 +218,19 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
     setVerificationResult(null);
   };
 
-  // Fee Modal (Blocking ONLY for unpaid users)
-  if (showFeeModal && user.verificationStatus === 'unpaid') {
-    return (
-      <div className="fixed inset-0 z-50 bg-gray-900/90 backdrop-blur-sm flex items-center justify-center p-4">
-        <Card className="max-w-md w-full text-center p-8 animate-slide-up">
-          <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce-soft">
+  // --- COMPONENT: Fee Payment Card ---
+  const FeePaymentContent = () => (
+      <Card className="max-w-md mx-auto text-center p-8 animate-slide-up">
+          <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <Lock className="w-8 h-8" />
           </div>
           <h2 className="text-2xl font-bold mb-2">One-Time Access Fee</h2>
           <p className="text-gray-500 mb-6">
-            To ensure quality and prevent spam, we require a small one-time verification fee of <strong>$1.00</strong> (approx ₦1,500).
+            To ensure quality and unlock earning tasks, please pay the <strong>$1.00</strong> (approx ₦1,500) verification fee.
           </p>
           
           <Button 
-            onClick={() => initializeFeePayment(onSuccessFee, onCloseFee)} 
+            onClick={() => initializeFeePayment(onSuccessFee, () => {})} 
             isLoading={isProcessing} 
             className="w-full py-3 text-lg shadow-xl shadow-green-200 dark:shadow-none bg-green-600 hover:bg-green-700 mb-4"
           >
@@ -270,17 +245,47 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
           
           <BankDetails />
 
-          <p className="text-xs text-gray-500 mb-4">
-             If you used manual transfer, click below. Admin approval required (2-24 hrs).
-          </p>
-          
           <Button variant="outline" onClick={handlePayEntryFeeManual} isLoading={isProcessing} className="w-full py-2">
              I Have Sent Manual Transfer
           </Button>
-        </Card>
+      </Card>
+  );
+
+  // --- COMPONENT: Locked Wallet ---
+  const LockedWalletView = () => (
+      <div className="relative">
+          <div className="absolute inset-0 bg-white/60 dark:bg-gray-900/60 backdrop-blur-[2px] z-10 flex items-center justify-center rounded-xl">
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl text-center border border-yellow-200 max-w-sm">
+                  <Clock className="w-12 h-12 text-yellow-500 mx-auto mb-3" />
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">Wallet Locked</h3>
+                  <p className="text-gray-500 mb-4 text-sm">
+                      Your fee payment is pending Admin approval. Withdrawals are disabled until verified.
+                  </p>
+                  <Button variant="outline" size="sm" disabled>Awaiting Verification</Button>
+              </div>
+          </div>
+          {/* Render Wallet in background (disabled) */}
+          <WalletSection 
+            user={user} 
+            transactions={transactions} 
+            onUpdateUser={onUpdateUser}
+            onWithdrawRequest={async () => {}}
+            isLocked={true}
+          />
       </div>
-    );
-  }
+  );
+
+  // Filter Tasks
+  const filteredTasks = tasks.filter(task => {
+    const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesPlatform = filterPlatform === 'all' || task.platform === filterPlatform;
+    const matchesType = filterType === 'all' || task.type === filterType;
+    return matchesSearch && matchesPlatform && matchesType;
+  }).sort((a, b) => {
+    if (sortBy === 'reward_high') return b.reward - a.reward;
+    if (sortBy === 'reward_low') return a.reward - b.reward;
+    return 0; 
+  });
 
   return (
     <div className="space-y-6 animate-fade-in pb-20">
@@ -292,43 +297,11 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
               <div>
                   <h4 className="font-bold text-yellow-800 dark:text-yellow-400">Verification Pending</h4>
                   <p className="text-sm text-yellow-700 dark:text-yellow-500 mt-1">
-                      You can earn rewards, but withdrawals are paused until an Admin verifies your one-time fee payment.
+                      You can engage and earn, but withdrawals are locked until Admin confirms your fee.
                   </p>
               </div>
           </div>
       )}
-
-      {/* Top Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="p-4 bg-gradient-to-br from-indigo-500 to-purple-600 text-white border-none shadow-lg transform hover:scale-[1.02] transition-transform">
-          <div className="text-indigo-100 text-sm mb-1">Wallet Balance</div>
-          <div className="text-2xl font-bold flex items-center">
-            <DollarSign className="w-5 h-5 mr-1" />
-            {user.balance.toFixed(2)}
-          </div>
-        </Card>
-        <Card className="p-4 transform hover:scale-[1.02] transition-transform">
-          <div className="text-gray-500 text-sm mb-1">XP Points</div>
-          <div className="text-2xl font-bold flex items-center text-yellow-600">
-            <Zap className="w-5 h-5 mr-1 fill-yellow-500" />
-            {user.xp}
-          </div>
-        </Card>
-        <Card className="p-4 transform hover:scale-[1.02] transition-transform">
-          <div className="text-gray-500 text-sm mb-1">Tasks Done</div>
-          <div className="text-2xl font-bold flex items-center text-green-600">
-            <CheckCircle className="w-5 h-5 mr-1" />
-            {transactions.filter(t => t.type === 'earning').length}
-          </div>
-        </Card>
-        <Card className="p-4 transform hover:scale-[1.02] transition-transform">
-          <div className="text-gray-500 text-sm mb-1">Rank</div>
-          <div className="text-2xl font-bold flex items-center text-blue-600">
-            <Trophy className="w-5 h-5 mr-1" />
-            {user.xp > 1000 ? 'Gold' : user.xp > 500 ? 'Silver' : 'Bronze'}
-          </div>
-        </Card>
-      </div>
 
       {/* Tabs */}
       <div className="flex space-x-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto pb-1">
@@ -347,236 +320,193 @@ const EngagerView: React.FC<EngagerViewProps> = ({ user, onUpdateUser, refreshTr
         ))}
       </div>
 
-      {/* Tasks View */}
+      {/* --- TASKS VIEW --- */}
       {activeTab === 'tasks' && (
-        <div className="space-y-4 animate-slide-up">
-          {/* Filters & Sorting */}
-          <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 space-y-4 md:space-y-0 md:flex md:items-center md:space-x-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input 
-                   placeholder="Search tasks..." 
-                   value={searchTerm}
-                   onChange={e => setSearchTerm(e.target.value)}
-                   className="pl-9 h-10"
-                />
-              </div>
-              <div className="flex space-x-2 overflow-x-auto pb-2 md:pb-0">
-                  <Select 
-                    value={filterPlatform} 
-                    onChange={e => setFilterPlatform(e.target.value)}
-                    className="w-32 h-10"
-                  >
-                      <option value="all">All Platforms</option>
-                      <option value="instagram">Instagram</option>
-                      <option value="youtube">YouTube</option>
-                      <option value="tiktok">TikTok</option>
-                      <option value="twitter">Twitter</option>
-                      <option value="linkedin">LinkedIn</option>
-                  </Select>
+        user.verificationStatus === 'unpaid' ? (
+            <div className="py-8">
+                <FeePaymentContent />
+            </div>
+        ) : (
+            <div className="space-y-4 animate-slide-up">
+            {/* Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <Card className="p-4 bg-indigo-600 text-white border-none"><div className="text-indigo-100 text-xs">Balance</div><div className="text-2xl font-bold">${user.balance.toFixed(2)}</div></Card>
+                <Card className="p-4"><div className="text-gray-500 text-xs">Tasks</div><div className="text-2xl font-bold text-green-600">{transactions.filter(t => t.type === 'earning').length}</div></Card>
+                <Card className="p-4"><div className="text-gray-500 text-xs">XP</div><div className="text-2xl font-bold text-yellow-500">{user.xp}</div></Card>
+                <Card className="p-4"><div className="text-gray-500 text-xs">Rank</div><div className="text-2xl font-bold text-blue-500">{user.xp > 1000 ? 'Gold' : 'Silver'}</div></Card>
+            </div>
 
-                  <Select 
-                    value={filterType} 
-                    onChange={e => setFilterType(e.target.value)}
-                    className="w-32 h-10"
-                  >
-                      <option value="all">All Actions</option>
-                      <option value="like">Like</option>
-                      <option value="comment">Comment</option>
-                      <option value="follow">Follow</option>
-                      <option value="share">Share</option>
-                      <option value="view">View</option>
-                  </Select>
-                  
-                  <Select 
-                    value={sortBy} 
-                    onChange={e => setSortBy(e.target.value as any)}
-                    className="w-40 h-10 font-medium"
-                  >
-                      <option value="newest">Newest First</option>
-                      <option value="reward_high">Reward: High to Low</option>
-                      <option value="reward_low">Reward: Low to High</option>
-                  </Select>
-              </div>
-          </div>
+            {/* Filters */}
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col md:flex-row gap-4">
+                <Input placeholder="Search tasks..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="flex-1" />
+                <Select value={filterPlatform} onChange={e => setFilterPlatform(e.target.value)} className="w-32">
+                    <option value="all">Platform</option><option value="instagram">IG</option><option value="tiktok">TikTok</option><option value="youtube">YT</option>
+                </Select>
+            </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredTasks.map(task => (
-              <Card key={task.id} className="hover:shadow-lg transition-all relative overflow-hidden group border border-gray-100 dark:border-gray-700">
-                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
-                <div className="flex justify-between items-start mb-3 pl-2">
-                  <div className="flex items-center space-x-2">
-                     <span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wide
-                        ${task.platform === 'instagram' ? 'bg-pink-100 text-pink-700' : 
-                          task.platform === 'youtube' ? 'bg-red-100 text-red-700' :
-                          task.platform === 'tiktok' ? 'bg-black text-white' :
-                          'bg-blue-100 text-blue-700'}`}>
-                        {task.platform}
-                     </span>
-                     <span className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded capitalize">{task.type}</span>
-                  </div>
-                  <span className="font-bold text-green-600 bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded-lg border border-green-100 dark:border-green-800 flex items-center">
-                    <DollarSign className="w-3 h-3 mr-1" />{task.reward.toFixed(2)}
-                  </span>
-                </div>
-                
-                <h3 className="font-semibold text-base mb-4 pl-2 pr-2 line-clamp-2 min-h-[3rem] flex items-center">{task.title}</h3>
-                
-                <div className="flex space-x-2 pl-2">
-                  {task.targetUrl && (
-                      <Button 
-                        variant="outline" 
-                        className="flex-1 text-xs py-2"
-                        onClick={() => window.open(task.targetUrl, '_blank')}
-                      >
-                        <ExternalLink className="w-3 h-3 mr-1" /> Open Link
-                      </Button>
-                  )}
-                  <Button 
-                    className="flex-1 text-xs py-2 bg-indigo-600 hover:bg-indigo-700" 
-                    onClick={() => setVerifyingTask(task)}
-                  >
-                    Complete & Earn
-                  </Button>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
+            {/* Task List */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredTasks.map(task => (
+                <Card key={task.id} className="hover:shadow-lg transition-all relative overflow-hidden group border-l-4 border-l-indigo-500">
+                    <div className="flex justify-between items-start mb-3">
+                        <Badge color="blue">{task.platform}</Badge>
+                        <span className="font-bold text-green-600 bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded-lg border border-green-100 dark:border-green-800">
+                            ${task.reward.toFixed(2)}
+                        </span>
+                    </div>
+                    <h3 className="font-semibold text-base mb-4 line-clamp-2 min-h-[3rem]">{task.title}</h3>
+                    <div className="flex space-x-2">
+                        {task.targetUrl && (
+                            <Button variant="outline" className="flex-1 text-xs" onClick={() => window.open(task.targetUrl, '_blank')}>
+                                <ExternalLink className="w-3 h-3 mr-1" /> Open
+                            </Button>
+                        )}
+                        <Button className="flex-1 text-xs" onClick={() => setVerifyingTask(task)}>
+                            Complete
+                        </Button>
+                    </div>
+                </Card>
+                ))}
+            </div>
+            </div>
+        )
       )}
 
+      {/* --- WALLET VIEW --- */}
       {activeTab === 'wallet' && (
-          <WalletSection 
-            user={user} 
-            transactions={transactions} 
-            onUpdateUser={onUpdateUser}
-            onWithdrawRequest={async (amount, method, details) => {
-                await storageService.createTransaction({
-                  id: '',
-                  userId: user.id,
-                  userName: user.name,
-                  amount,
-                  type: 'withdrawal',
-                  status: 'pending',
-                  method,
-                  details,
-                  timestamp: Date.now()
-                });
-                const updated = { ...user, balance: user.balance - amount };
-                await storageService.updateUser(updated);
-                onUpdateUser(updated);
-                alert("Withdrawal request submitted for review.");
-            }}
-          />
+          user.verificationStatus === 'unpaid' ? (
+              <div className="py-8"><FeePaymentContent /></div>
+          ) : user.verificationStatus === 'pending' ? (
+              <LockedWalletView />
+          ) : (
+              <WalletSection 
+                user={user} 
+                transactions={transactions} 
+                onUpdateUser={onUpdateUser}
+                onWithdrawRequest={async (amount, method, details) => {
+                    await storageService.createTransaction({
+                      id: '', userId: user.id, userName: user.name, amount, type: 'withdrawal', status: 'pending', method, details, timestamp: Date.now()
+                    });
+                    onUpdateUser({ ...user, balance: user.balance - amount });
+                    alert("Withdrawal request submitted.");
+                }}
+              />
+          )
       )}
 
-      {/* Verification Modal */}
+      {/* --- PROFILE VIEW (Always Accessible) --- */}
+      {activeTab === 'profile' && (
+          <div className="max-w-2xl mx-auto animate-slide-up">
+              <Card className="overflow-hidden mb-6">
+                  <div className="h-32 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+                  <div className="px-6 pb-6 relative">
+                      <div className="flex justify-between items-end -mt-12 mb-4">
+                          <div className="relative group">
+                              <img src={user.avatar} className="w-24 h-24 rounded-full border-4 border-white dark:border-gray-800 bg-white object-cover" />
+                              <label className="absolute bottom-0 right-0 bg-gray-900 text-white p-1.5 rounded-full cursor-pointer hover:scale-110 transition-transform">
+                                  <Camera className="w-4 h-4" />
+                                  <input type="file" className="hidden" accept="image/*" onChange={handleProfileUpload} />
+                              </label>
+                          </div>
+                          <Badge color={user.verificationStatus === 'verified' ? 'green' : user.verificationStatus === 'pending' ? 'yellow' : 'red'} className="text-sm px-3 py-1">
+                              {user.verificationStatus.toUpperCase()}
+                          </Badge>
+                      </div>
+                      
+                      <h2 className="text-2xl font-bold">{user.name}</h2>
+                      <p className="text-gray-500 text-sm flex items-center mb-4"><Mail className="w-3 h-3 mr-1"/> {user.email}</p>
+                      
+                      <div className="grid grid-cols-2 gap-4 border-t border-gray-100 dark:border-gray-700 pt-4">
+                          <div>
+                              <div className="text-xs text-gray-500 uppercase tracking-wide">Tasks Done</div>
+                              <div className="text-xl font-bold">{transactions.filter(t => t.type === 'earning').length}</div>
+                          </div>
+                          <div>
+                              <div className="text-xs text-gray-500 uppercase tracking-wide">Total Earned</div>
+                              <div className="text-xl font-bold text-green-600">
+                                  ${transactions.filter(t => t.type === 'earning').reduce((acc, t) => acc + t.amount, 0).toFixed(2)}
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+              </Card>
+
+              {user.verificationStatus === 'unpaid' && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 flex items-center justify-between">
+                      <div className="flex items-center">
+                          <AlertTriangle className="w-5 h-5 text-red-600 mr-3" />
+                          <div>
+                              <h4 className="font-bold text-red-800 dark:text-red-300">Account Unverified</h4>
+                              <p className="text-xs text-red-600 dark:text-red-400">Pay the fee to unlock withdrawals and premium tasks.</p>
+                          </div>
+                      </div>
+                      <Button size="sm" variant="danger" onClick={() => setActiveTab('wallet')}>Pay Now</Button>
+                  </div>
+              )}
+          </div>
+      )}
+
+      {/* --- LEADERBOARD --- */}
+      {activeTab === 'leaderboard' && (
+          <div className="text-center py-10 text-gray-500">
+              <Trophy className="w-16 h-16 mx-auto mb-4 text-yellow-400 opacity-50" />
+              <h3 className="text-xl font-bold">Leaderboard Coming Soon</h3>
+              <p>Top earners will be displayed here.</p>
+          </div>
+      )}
+
+      {/* Verification Modal (Tasks) */}
       <Modal 
         isOpen={!!verifyingTask} 
         onClose={closeVerifyModal}
-        title={verificationResult?.success ? 'Task Completed!' : `Verify Task: ${verifyingTask?.platform}`}
+        title={verificationResult?.success ? 'Task Completed!' : `Verify: ${verifyingTask?.title}`}
         maxWidth="max-w-lg"
       >
         {verificationResult?.success ? (
-          <div className="flex flex-col items-center justify-center py-10 animate-fade-in">
-             <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mb-4 animate-bounce">
-                <CheckCircle className="w-10 h-10" />
-             </div>
-             <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Awesome Job!</h3>
-             <p className="text-gray-500 dark:text-gray-400 text-center">{verificationResult.message}</p>
-             <div className="mt-6 flex items-center space-x-2 text-indigo-600 font-semibold bg-indigo-50 dark:bg-indigo-900/20 px-4 py-2 rounded-full">
-                <DollarSign className="w-4 h-4" />
-                <span>Reward Added</span>
-             </div>
+          <div className="flex flex-col items-center justify-center py-10">
+             <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4"><CheckCircle className="w-8 h-8" /></div>
+             <h3 className="text-xl font-bold">Success!</h3>
+             <p className="text-gray-500 mb-4">{verificationResult.message}</p>
           </div>
         ) : (
-           <>
-            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                <p className="text-sm font-semibold">{verifyingTask?.title}</p>
-                <p className="text-xs text-green-600 font-bold mt-1">Reward: ${verifyingTask?.reward.toFixed(2)}</p>
-                {verifyingTask?.targetUrl && (
-                    <a href={verifyingTask.targetUrl} target="_blank" className="text-xs text-indigo-500 underline block mt-1">
-                        Go to Task
-                    </a>
-                )}
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                 <label className="block text-sm font-medium mb-1">Your Social Handle/Username</label>
-                 <Input 
-                   placeholder="@username" 
-                   value={verifyHandle}
-                   onChange={e => setVerifyHandle(e.target.value)}
-                 />
+           <div className="space-y-4">
+              <div className="bg-blue-50 p-3 rounded-lg text-sm text-blue-800">
+                  Submit proof that you completed: <strong>{verifyingTask?.title}</strong>
               </div>
-
+              <div><label className="text-sm font-bold block mb-1">Your Handle</label><Input value={verifyHandle} onChange={e => setVerifyHandle(e.target.value)} placeholder="@username"/></div>
+              <div><label className="text-sm font-bold block mb-1">Proof Link (Optional)</label><Input value={verifyLink} onChange={e => setVerifyLink(e.target.value)} placeholder="https://..."/></div>
               <div>
-                 <label className="block text-sm font-medium mb-1">Link to your Proof (Post/Comment)</label>
-                 <Input 
-                   placeholder="https://..." 
-                   value={verifyLink}
-                   onChange={e => setVerifyLink(e.target.value)}
-                 />
-              </div>
-
-              <div>
-                 <label className="block text-sm font-medium mb-1">Upload Screenshot</label>
-                 <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-4 text-center">
-                    {verifyImage ? (
-                        <div className="relative">
-                            <img src={verifyImage} className="max-h-32 mx-auto rounded" />
-                            <button onClick={() => setVerifyImage(null)} className="absolute top-0 right-0 bg-red-500 text-white rounded-full p-1"><ShieldAlert className="w-3 h-3"/></button>
-                        </div>
-                    ) : (
-                        <label className="cursor-pointer flex flex-col items-center justify-center">
-                            <Upload className="w-6 h-6 text-gray-400 mb-2" />
-                            <span className="text-xs text-gray-500">Click to upload proof</span>
-                            <input type="file" className="hidden" accept="image/*" onChange={handleProofImageUpload} />
-                        </label>
-                    )}
+                 <label className="text-sm font-bold block mb-1">Screenshot</label>
+                 <div className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer relative">
+                    {verifyImage ? <span className="text-green-600 font-bold">Image Selected</span> : <span className="text-gray-400">Click to Upload</span>}
+                    <input type="file" className="absolute inset-0 opacity-0" onChange={handleProofImageUpload} accept="image/*" />
                  </div>
               </div>
-              
-              {verificationResult && !verificationResult.success && (
-                  <div className="p-3 bg-red-100 text-red-700 text-sm rounded-lg flex items-start animate-slide-up">
-                      <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0 mt-0.5" />
-                      <span>{verificationResult.message}</span>
-                  </div>
-               )}
-            </div>
-
-            <div className="flex justify-end space-x-2 pt-6 border-t border-gray-100 dark:border-gray-700 mt-4">
-              <Button variant="ghost" onClick={closeVerifyModal}>Cancel</Button>
-              <Button onClick={handleVerify} isLoading={isProcessing} disabled={!verifyHandle && !verifyLink && !verifyImage}>
-                Submit Proof
-              </Button>
-            </div>
-           </>
+              {verificationResult && <div className="text-red-500 text-sm font-bold">{verificationResult.message}</div>}
+              <Button className="w-full mt-2" onClick={handleVerify} isLoading={isProcessing}>Submit Proof</Button>
+           </div>
         )}
       </Modal>
     </div>
   );
 };
 
-// --- Sub Component: Wallet Section (Updated with Paystack) ---
+// --- Sub Component: Wallet Section ---
 const WalletSection: React.FC<{ 
   user: User; 
   transactions: Transaction[];
   onUpdateUser: (u: User) => void;
-  onWithdrawRequest: (amount: number, method: string, details: string) => Promise<void> 
-}> = ({ user, transactions, onUpdateUser, onWithdrawRequest }) => {
-  const [withdrawAmount, setWithdrawAmount] = useState<string>('');
+  onWithdrawRequest: (amount: number, method: string, details: string) => Promise<void>;
+  isLocked?: boolean;
+}> = ({ user, transactions, onUpdateUser, onWithdrawRequest, isLocked = false }) => {
+  const [withdrawAmount, setWithdrawAmount] = useState('');
   const [method, setMethod] = useState('Bank Transfer');
-  const [country, setCountry] = useState('Nigeria');
-  const [bankName, setBankName] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
+  const [details, setDetails] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
-  
-  // Paystack Deposit Logic
+
+  // Paystack Deposit
   const exchangeRate = 1500;
   const depositKobo = depositAmount ? parseFloat(depositAmount) * exchangeRate * 100 : 0;
   const depositConfig = {
@@ -589,168 +519,73 @@ const WalletSection: React.FC<{
 
   const onSuccessDeposit = async (reference: any) => {
       const amountUSD = parseFloat(depositAmount);
-      
       const tx: Transaction = {
        id: reference.reference,
        userId: user.id,
        userName: user.name,
        amount: amountUSD,
        type: 'deposit',
-       status: 'completed', // Instant completion
+       status: 'completed',
        method: 'Paystack Card',
        details: `Wallet Deposit (Ref: ${reference.reference})`,
        timestamp: Date.now()
      };
-
      await storageService.createTransaction(tx);
-     
      const updatedUser = { ...user, balance: user.balance + amountUSD };
      await storageService.updateUser(updatedUser);
      onUpdateUser(updatedUser);
-
      setShowDepositModal(false);
      setDepositAmount('');
-     alert("Deposit Successful! Balance updated.");
+     alert("Deposit Successful!");
   };
 
-  const isVerified = user.verificationStatus === 'verified';
-
-  const handleWithdraw = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isVerified) return alert("Account not verified. Withdrawals are disabled.");
-    
-    const amt = parseFloat(withdrawAmount);
-    if (isNaN(amt) || amt <= 0) return alert("Please enter a valid amount.");
-    if (amt > user.balance) return alert("Insufficient funds");
-    if (amt < 5) return alert("Minimum withdrawal is $5.00");
-    if (method === 'Bank Transfer' && (!bankName || !accountNumber)) return alert("Please fill in bank details");
-    if (method !== 'Bank Transfer' && !accountNumber) return alert("Please enter wallet address");
-    
-    setShowConfirm(true);
-  };
-
-  const confirmWithdrawal = async () => {
-    setLoading(true);
-    const amt = parseFloat(withdrawAmount);
-    const details = method === 'Crypto (USDT)' 
-      ? `Wallet: ${accountNumber} (Network: TRC20)`
-      : `${bankName} - ${accountNumber}, Country: ${country}`;
-    
-    // Process request (simulate delay + API call)
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    await onWithdrawRequest(amt, method, details);
-    
-    // Cleanup
-    setWithdrawAmount('');
-    setBankName('');
-    setAccountNumber('');
-    setLoading(false);
-    setShowConfirm(false);
+  const handleWithdraw = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if(isLocked) return;
+      const amt = parseFloat(withdrawAmount);
+      if(amt > user.balance) return alert("Insufficient funds");
+      if(amt < 5) return alert("Min withdrawal $5");
+      
+      setLoading(true);
+      await onWithdrawRequest(amt, method, details);
+      setWithdrawAmount('');
+      setDetails('');
+      setLoading(false);
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${isLocked ? 'opacity-50 pointer-events-none filter blur-[1px]' : ''}`}>
       <div className="space-y-6">
-        {/* Balance Card */}
         <Card className="bg-gradient-to-r from-indigo-600 to-indigo-800 text-white border-none">
            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-indigo-200 text-sm mb-1">Available Balance</p>
-                <h2 className="text-4xl font-bold">${user.balance.toFixed(2)}</h2>
-              </div>
-              <Button size="sm" variant="secondary" onClick={() => setShowDepositModal(true)}>
-                 <Plus className="w-4 h-4 mr-1" /> Add Funds
-              </Button>
+              <div><p className="text-indigo-200 text-sm mb-1">Available Balance</p><h2 className="text-4xl font-bold">${user.balance.toFixed(2)}</h2></div>
+              <Button size="sm" variant="secondary" onClick={() => setShowDepositModal(true)} disabled={isLocked}><Plus className="w-4 h-4 mr-1" /> Add Funds</Button>
            </div>
         </Card>
 
         <Card>
-          <h3 className="text-lg font-bold mb-4 flex items-center">
-            <Banknote className="w-5 h-5 mr-2 text-green-600" /> Request Withdrawal
-          </h3>
+          <h3 className="text-lg font-bold mb-4 flex items-center"><Banknote className="w-5 h-5 mr-2 text-green-600" /> Request Withdrawal</h3>
           <form onSubmit={handleWithdraw} className="space-y-4">
-            {!isVerified && (
-                <div className="text-xs text-red-500 font-bold bg-red-50 p-2 rounded border border-red-100 mb-2">
-                    Withdrawals require verified account status.
-                </div>
-            )}
-            <div>
-              <label className="block text-sm font-medium mb-1">Amount ($)</label>
-              <Input 
-                  type="number" 
-                  min="5" 
-                  step="0.01" 
-                  max={user.balance}
-                  value={withdrawAmount}
-                  onChange={e => setWithdrawAmount(e.target.value)}
-                  placeholder="0.00"
-                  disabled={!isVerified}
-                  required
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Payment Method</label>
-              <Select value={method} onChange={e => setMethod(e.target.value)} disabled={!isVerified}>
-                <option value="Bank Transfer">Bank Transfer</option>
-                <option value="Crypto (USDT)">Crypto (USDT)</option>
-              </Select>
-            </div>
-
-            {method === 'Bank Transfer' ? (
-                <>
-                   <div>
-                     <label className="block text-sm font-medium mb-1">Bank Name</label>
-                     <Input required value={bankName} onChange={e => setBankName(e.target.value)} placeholder="e.g. Chase, Access Bank" disabled={!isVerified} />
-                   </div>
-                   <div>
-                     <label className="block text-sm font-medium mb-1">Account Number</label>
-                     <Input required value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="0000000000" disabled={!isVerified} />
-                   </div>
-                </>
-            ) : (
-                <div>
-                   <label className="block text-sm font-medium mb-1">Wallet Address (TRC20)</label>
-                   <Input required value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="T..." disabled={!isVerified} />
-                </div>
-            )}
-
-            <Button type="submit" className="w-full" disabled={user.balance < 5 || !isVerified}>
-              Request Withdrawal
-            </Button>
+            <div><label className="block text-sm font-medium mb-1">Amount ($)</label><Input type="number" min="5" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} required disabled={isLocked} /></div>
+            <div><label className="block text-sm font-medium mb-1">Method</label><Select value={method} onChange={e => setMethod(e.target.value)} disabled={isLocked}><option>Bank Transfer</option><option>Crypto (USDT)</option></Select></div>
+            <div><label className="block text-sm font-medium mb-1">Details (Acct No / Wallet)</label><Input value={details} onChange={e => setDetails(e.target.value)} required disabled={isLocked} /></div>
+            <Button type="submit" className="w-full" disabled={isLocked || loading}>Request Withdrawal</Button>
           </form>
         </Card>
       </div>
       
-      {/* Transaction History */}
       <Card>
-        <h3 className="text-lg font-bold mb-4 flex items-center">
-          <History className="w-5 h-5 mr-2 text-gray-500" /> Recent Transactions
-        </h3>
+        <h3 className="text-lg font-bold mb-4 flex items-center"><History className="w-5 h-5 mr-2 text-gray-500" /> Transactions</h3>
         <div className="space-y-4 max-h-[400px] overflow-y-auto">
-          {transactions.length === 0 && <p className="text-gray-500 text-sm">No transactions yet.</p>}
           {transactions.map(tx => (
-            <div key={tx.id} className="flex justify-between items-center border-b border-gray-100 dark:border-gray-700 pb-3 last:border-0">
+            <div key={tx.id} className="flex justify-between items-center border-b pb-3">
                <div>
-                 <div className="font-bold text-sm flex items-center">
-                    {tx.type === 'earning' && <Zap className="w-3 h-3 mr-1 text-yellow-500" />}
-                    {tx.type === 'withdrawal' && <ArrowUpDown className="w-3 h-3 mr-1 text-red-500" />}
-                    {tx.type === 'deposit' && <Plus className="w-3 h-3 mr-1 text-green-500" />}
-                    <span className="capitalize">{tx.type}</span>
-                 </div>
+                 <div className="font-bold text-sm capitalize">{tx.type}</div>
                  <div className="text-xs text-gray-500">{new Date(tx.timestamp).toLocaleDateString()}</div>
-                 <div className="text-xs text-gray-400 truncate max-w-[150px]">{tx.details}</div>
                </div>
                <div className="text-right">
-                  <div className={`font-bold ${
-                      tx.type === 'earning' || tx.type === 'deposit' ? 'text-green-600' : 
-                      tx.type === 'withdrawal' || tx.type === 'fee' ? 'text-red-600' : 'text-gray-600'
-                  }`}>
-                    {tx.type === 'withdrawal' || tx.type === 'fee' ? '-' : '+'}${tx.amount.toFixed(2)}
-                  </div>
-                  <Badge color={tx.status === 'completed' ? 'green' : tx.status === 'pending' ? 'yellow' : 'red'}>
-                    {tx.status}
-                  </Badge>
+                  <div className={`font-bold ${tx.type === 'earning' ? 'text-green-600' : 'text-red-600'}`}>{tx.type === 'earning' ? '+' : '-'}${tx.amount.toFixed(2)}</div>
+                  <Badge color={tx.status === 'completed' ? 'green' : 'yellow'}>{tx.status}</Badge>
                </div>
             </div>
           ))}
@@ -759,54 +594,10 @@ const WalletSection: React.FC<{
 
       <Modal isOpen={showDepositModal} onClose={() => setShowDepositModal(false)} title="Add Funds">
          <div className="space-y-4">
-            <div>
-               <label className="block text-sm font-medium mb-1">Amount to Deposit ($)</label>
-               <Input 
-                 type="number" 
-                 value={depositAmount} 
-                 onChange={e => setDepositAmount(e.target.value)} 
-                 placeholder="0.00"
-               />
-               <p className="text-xs text-gray-500 mt-1">Approx. ₦{(parseFloat(depositAmount || '0') * exchangeRate).toLocaleString()}</p>
-            </div>
-            
-            <Button 
-                className="w-full bg-green-600 hover:bg-green-700 text-white" 
-                onClick={() => initializeDeposit(onSuccessDeposit, () => {})}
-                disabled={!depositAmount || parseFloat(depositAmount) <= 0}
-            >
-               Pay with Paystack
-            </Button>
+            <Input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} placeholder="Amount ($)" />
+            <p className="text-xs text-gray-500">Approx: ₦{(parseFloat(depositAmount||'0')*exchangeRate).toLocaleString()}</p>
+            <Button className="w-full bg-green-600" onClick={() => initializeDeposit(onSuccessDeposit, ()=>{})} disabled={!depositAmount}>Pay with Paystack</Button>
          </div>
-      </Modal>
-
-      <Modal isOpen={showConfirm} onClose={() => !loading && setShowConfirm(false)} title="Confirm Withdrawal">
-          <div className="space-y-4">
-              <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg flex items-start">
-                  <AlertTriangle className="w-5 h-5 mr-2 flex-shrink-0" />
-                  <p className="text-sm">Please verify your details carefully. Withdrawals cannot be reversed once processed.</p>
-              </div>
-              
-              <div className="border rounded-lg p-4 space-y-2 bg-gray-50 dark:bg-gray-800">
-                  <div className="flex justify-between">
-                      <span className="text-gray-500">Amount:</span>
-                      <span className="font-bold text-lg text-red-600">-${parseFloat(withdrawAmount).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                      <span className="text-gray-500">Method:</span>
-                      <span className="font-medium">{method}</span>
-                  </div>
-                  <div className="flex justify-between">
-                      <span className="text-gray-500">Details:</span>
-                      <span className="font-medium text-right break-all pl-4">{method === 'Bank Transfer' ? `${bankName} - ${accountNumber}` : accountNumber}</span>
-                  </div>
-              </div>
-
-              <div className="flex space-x-3 pt-4">
-                  <Button variant="ghost" onClick={() => setShowConfirm(false)} className="flex-1" disabled={loading}>Cancel</Button>
-                  <Button onClick={confirmWithdrawal} className="flex-1" isLoading={loading}>Confirm & Withdraw</Button>
-              </div>
-          </div>
       </Modal>
     </div>
   );
