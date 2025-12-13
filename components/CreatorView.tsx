@@ -18,6 +18,7 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
   const [loadingInsight, setLoadingInsight] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
   
   // Paystack Configuration (Updated to External Link)
   const exchangeRate = 1500; // 1 USD = 1500 NGN
@@ -61,6 +62,7 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
   });
 
   const generateCertificate = async (type: 'creator' | 'vip') => {
+      setIsProcessing(true);
       // Simulate generation
       setTimeout(async () => {
           const newCert: Certificate = {
@@ -74,8 +76,9 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
           const updatedUser = { ...user, certificates: [...(user.certificates || []), newCert] };
           await storageService.updateUser(updatedUser);
           onUpdateUser(updatedUser);
+          setIsProcessing(false);
           alert("Certificate Generated!");
-      }, 1000);
+      }, 1500);
   };
 
   const handleCreateCampaign = async (e: React.FormEvent) => {
@@ -448,10 +451,10 @@ const CreatorView: React.FC<CreatorViewProps> = ({ user, onUpdateUser }) => {
                   <div className="flex justify-between items-center">
                       <h3 className="text-lg font-bold flex items-center"><Award className="w-5 h-5 mr-2 text-indigo-500"/> Certificate Engine</h3>
                       {campaigns.reduce((acc, c) => acc + c.totalBudget, 0) > 100 && !user.certificates?.some(c => c.theme === 'platinum') && (
-                          <Button size="sm" onClick={() => generateCertificate('vip')}>Claim VIP</Button>
+                          <Button size="sm" onClick={() => generateCertificate('vip')} isLoading={isProcessing}>Claim VIP</Button>
                       )}
                       {!user.certificates?.some(c => c.theme === 'bronze') && (
-                          <Button size="sm" variant="outline" onClick={() => generateCertificate('creator')}>Claim Creator</Button>
+                          <Button size="sm" variant="outline" onClick={() => generateCertificate('creator')} isLoading={isProcessing}>Claim Creator</Button>
                       )}
                   </div>
                   

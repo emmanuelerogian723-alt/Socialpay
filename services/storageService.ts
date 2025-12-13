@@ -12,7 +12,7 @@ const sanitize = (str: string): string => {
     return str.replace(/[<>]/g, ''); 
 };
 
-// --- INDEXED DB ADAPTER (Robust Fallback for Media) ---
+// --- INDEXED DB ADAPTER (Robust Phone Storage) ---
 const DB_NAME = 'SocialPayDB';
 const DB_VERSION = 1;
 const STORE_MEDIA = 'media';
@@ -186,7 +186,7 @@ export const storageService = {
       try {
         const { data, error } = await supabase.from('profiles').select('*').eq('id', id).single();
         if (data) {
-             return { ...data, verificationStatus: data.verification_status, joinedAt: data.joined_at, badges: data.badges || [], followers: data.followers || [], following: data.following || [] } as User;
+             return { ...data, verificationStatus: data.verification_status, joinedAt: data.joined_at, badges: data.badges || [], followers: data.followers || [], following: data.following || [], certificates: data.certificates || [] } as User;
         }
         return null;
       } catch { return null; }
@@ -203,7 +203,7 @@ export const storageService = {
       await supabase.from('profiles').update({
         name: safeName, avatar: user.avatar, balance: user.balance,
         bio: safeBio, xp: user.xp, verification_status: user.verificationStatus,
-        followers: user.followers
+        followers: user.followers, certificates: user.certificates
       }).eq('id', user.id);
     } else {
         const users = getLocal<User[]>('users', []);
@@ -222,13 +222,14 @@ export const storageService = {
 
   async getUsers(): Promise<User[]> {
       return USE_SUPABASE 
-        ? (await supabase.from('profiles').select('*')).data?.map((u:any) => ({...u, verificationStatus: u.verification_status, badges: u.badges || [], followers: u.followers || [], following: u.following || []})) || []
+        ? (await supabase.from('profiles').select('*')).data?.map((u:any) => ({...u, verificationStatus: u.verification_status, badges: u.badges || [], followers: u.followers || [], following: u.following || [], certificates: u.certificates || []})) || []
         : getLocal<User[]>('users', []);
   },
 
-  // --- MEDIA ---
+  // --- MEDIA (DUAL STORAGE) ---
   async uploadMedia(file: Blob | File): Promise<string> {
     let fileToUpload = file;
+    // Compress images before upload
     if (file instanceof File || file instanceof Blob) {
         if ((file instanceof File ? file.type : file.type).startsWith('image/')) {
             try { fileToUpload = await compressImage(file); } catch {}
@@ -244,9 +245,11 @@ export const storageService = {
             const { data } = supabase.storage.from('socialpay-media').getPublicUrl(fileName);
             return data.publicUrl;
         } catch (error) {
+            console.warn("Supabase upload failed, falling back to Device Storage (IndexedDB)");
             return await saveMediaToIDB(fileToUpload);
         }
     } else {
+        // Fallback to IDB for demo/offline
         return await saveMediaToIDB(fileToUpload);
     }
   },
